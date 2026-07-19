@@ -13,7 +13,8 @@ A small, zero-cost, compile-time verified ordered identity primitive.
 ## Quick Start
 zig const UserId = zid.OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, });
 
-const clock = zid.SystemClock.init(io); const gen = try zid.Generator(UserId, zid.SystemClock).init(.{ .clock = &clock, .node = 1, });
+const clock = zid.SystemClock.init(io); 
+const gen = try zid.Generator(UserId, zid.SystemClock).init(.{ .clock = &clock, .node = 1, });
 
 const id = try gen.next();
 
