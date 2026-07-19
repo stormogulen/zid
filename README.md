@@ -18,6 +18,30 @@ A small, zero-cost, compile-time verified ordered identity primitive.
   node id fits the configured bits, but assigning unique ids across a
   fleet is left to the caller.
 
+## Extending zid
+
+OrderedId is the reference implementation, not the only one. Anything
+that follows the same shape counts as part of the zid ecosystem:
+
+- **Strongly typed** — each config is its own type, not a raw u64.
+- **Comptime config** — bad configs fail to compile, not to run.
+- **Explicit errors** — failures come back as real Zig errors, never
+  a magic value or a panic.
+- **Swappable dependencies** — anything that isn't deterministic (a
+  clock, randomness, a C library) gets passed in, so it can be swapped
+  for a fake in tests.
+
+`src/ordered/` is the reference to copy from.
+
+A couple of things worth knowing if you're adding a new identifier type:
+
+- **UUIDs or hash-based ids** don't sort the way `OrderedId` does —
+  that's fine, just say so in the doc comment.
+- **Wrapping a C library** is a different deal than pure Zig bit
+  math — the FFI calls aren't free, C error codes should become real
+  Zig errors, and it should be clear who owns any memory. Still
+  welcome, just don't call it zero-cost.
+
 ## Examples & Tests
 
 ```sh
