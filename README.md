@@ -1,6 +1,10 @@
 # zid — Zero-Cost Ordered Identity in Zig
 
 A small, zero-cost, compile-time verified ordered identity primitive.
+[![CI](https://github.com/<you>/zid/actions/workflows/ci.yml/badge.svg)](https://github.com/<you>/zid/actions/workflows/main.yml)
+
+[![Zig](https://img.shields.io/badge/zig-0.16.0-orange)](https://ziglang.org/)
+
 
 ## Features
 
