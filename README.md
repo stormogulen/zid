@@ -18,6 +18,15 @@ A small, zero-cost, compile-time verified ordered identity primitive.
   node id fits the configured bits, but assigning unique ids across a
   fleet is left to the caller.
 
+## Examples & Tests
+
+```sh
+zig build test              # run the unit test suite
+zig build run                # basic Generator + decode walkthrough
+zig build run-type-safety    # compile-time type distinctness, eql correctness
+zig build run-testing        # deterministic testing with ManualClock
+```
+
 ## Quick Start
 ```zig
 const UserId = zid.OrderedId(.{
