@@ -1,6 +1,7 @@
 //! Strongly typed OrderedId.
 //!
-//! Every invocation creates a unique Zig type.
+//! "Two configs with different .tag values always produce
+//! distinct types, even with identical bit widths.
 //!
 
 const std = @import("std");
@@ -152,4 +153,34 @@ test "identical bit widths still produce distinct types" {
     // NOTE: If this didn't compile, A and B would be the same type
     // and this comparison itself wouldn't type-check as written.
     try std.testing.expect(A != B);
+}
+
+test "fromRaw round trips through decode" {
+    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
+
+    const original = try TestId.fromParts(999, 5, 3);
+    const reconstructed = TestId.fromRaw(original.raw());
+
+    try std.testing.expect(original.eql(reconstructed));
+    try std.testing.expectEqual(@as(u64, 999), reconstructed.timestamp());
+    try std.testing.expectEqual(@as(u64, 5), reconstructed.node());
+    try std.testing.expectEqual(@as(u64, 3), reconstructed.sequence());
+}
+
+test "format produces the expected string" {
+    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
+
+    const id = try TestId.fromParts(1234, 7, 42);
+
+    const formatted = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{id});
+    defer std.testing.allocator.free(formatted);
+
+    const expected = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "OrderedId({d})[t=1234,n=7,s=42]",
+        .{id.raw()},
+    );
+    defer std.testing.allocator.free(expected);
+
+    try std.testing.expectEqualStrings(expected, formatted);
 }

@@ -1,3 +1,6 @@
+//! Errors
+//!
+
 pub const Error = error{
     FieldOutOfRange,
     InvalidNode,

@@ -46,16 +46,4 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("first.eql(second) = {}\n", .{first.eql(second)});
 
     std.debug.print("formatted: {f}\n", .{first});
-
-    // const parts = first.decode();
-
-    // std.debug.print(
-    //     "id={d} timestamp={d} node={d} sequence={d}\n",
-    //     .{ first.raw(), parts.timestamp, parts.node, parts.sequence },
-    // );
-
-    // std.debug.print(
-    //     "next id={d} sequence={d}\n",
-    //     .{ second.raw(), second.sequence() },
-    // );
 }

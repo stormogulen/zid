@@ -144,3 +144,16 @@ test "layout round trip" {
         parts.sequence,
     );
 }
+
+test "max*() report the exact value the field can hold" {
+    const L = Layout(.{
+        .timestamp_bits = 41,
+        .node_bits = 10,
+        .sequence_bits = 12,
+        .tag = struct {},
+    });
+
+    try std.testing.expectEqual(@as(u64, (1 << 41) - 1), L.maxTimestamp());
+    try std.testing.expectEqual(@as(u64, 1023), L.maxNode());
+    try std.testing.expectEqual(@as(u64, 4095), L.maxSequence());
+}

@@ -11,6 +11,8 @@
 //! - Read clocks.
 //! - Know about id layouts or bit widths.
 
+const std = @import("std");
+
 pub const Epoch = struct {
     unix_millis: u64,
 
@@ -26,8 +28,6 @@ pub const Epoch = struct {
         return .{ .unix_millis = unix_seconds * std.time.ms_per_s };
     }
 };
-
-const std = @import("std");
 
 test "unix epoch has zero offset" {
     try std.testing.expectEqual(

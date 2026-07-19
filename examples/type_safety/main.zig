@@ -36,25 +36,25 @@ pub fn main(init: std.process.Init) !void {
     });
 
     const user_id = try user_gen.next();
-        const order_id = try order_gen.next();
+    const order_id = try order_gen.next();
 
-        std.debug.print("user_id:  {f}\n", .{user_id});
-        std.debug.print("order_id: {f}\n", .{order_id});
+    std.debug.print("user_id:  {f}\n", .{user_id});
+    std.debug.print("order_id: {f}\n", .{order_id});
 
-        // Positive assertion: an id equals itself.
-        std.debug.print(
-            "user_id.eql(user_id) = {}\n",
-            .{user_id.eql(user_id)},
-        );
-        std.debug.assert(user_id.eql(user_id));
+    // Positive assertion: an id equals itself.
+    std.debug.print(
+        "user_id.eql(user_id) = {}\n",
+        .{user_id.eql(user_id)},
+    );
+    std.debug.assert(user_id.eql(user_id));
 
-        // Negative assertion: two ids generated back-to-back from the
-        // same generator differ in sequence, so they are not equal —
-        // eql() reflects that correctly.
-        const another_user_id = try user_gen.next();
-        std.debug.print(
-            "user_id.eql(another_user_id) = {}\n",
-            .{user_id.eql(another_user_id)},
-        );
-        std.debug.assert(!user_id.eql(another_user_id));
+    // Negative assertion: two ids generated back-to-back from the
+    // same generator differ in sequence, so they are not equal —
+    // eql() reflects that correctly.
+    const another_user_id = try user_gen.next();
+    std.debug.print(
+        "user_id.eql(another_user_id) = {}\n",
+        .{user_id.eql(another_user_id)},
+    );
+    std.debug.assert(!user_id.eql(another_user_id));
 }

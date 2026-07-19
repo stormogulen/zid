@@ -286,3 +286,26 @@ test "clock reading before the epoch is rejected" {
 
     try std.testing.expectError(error.ClockBeforeEpoch, gen.next());
 }
+
+test "clock reading exactly at the epoch yields timestamp zero" {
+    const std = @import("std");
+    const ordered = @import("ordered/ordered.zig");
+    const clock = @import("clock.zig");
+
+    const TestId = ordered.OrderedId(.{
+        .timestamp_bits = 41,
+        .node_bits = 10,
+        .sequence_bits = 12,
+        .tag = struct {},
+    });
+
+    var manual = clock.ManualClock{ .value = 1_000 };
+    var gen = try Generator(TestId, clock.ManualClock).init(.{
+        .node = 1,
+        .clock = &manual,
+        .epoch = epoch_mod.Epoch.fromUnixMillis(1_000),
+    });
+
+    const id = try gen.next();
+    try std.testing.expectEqual(@as(u64, 0), id.timestamp());
+}
