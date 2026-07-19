@@ -10,11 +10,31 @@ A small, zero-cost, compile-time verified ordered identity primitive.
 - **Explicit errors** — Clock drift, sequence exhaustion surfaced to caller
 - **Testable** — Swappable clock implementations for deterministic tests
 
+## Design Constraints
+
+- **Single-threaded** — `Generator` is not safe to share across threads;
+  no locking is used, which is part of how it stays zero-cost.
+- **Node id assignment is out of scope** — the library validates that a
+  node id fits the configured bits, but assigning unique ids across a
+  fleet is left to the caller.
+
 ## Quick Start
-const UserId = zid.OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, });
+```zig
+const UserId = zid.OrderedId(.{
+    .timestamp_bits = 41,
+    .node_bits = 10,
+    .sequence_bits = 12,
+    .tag = struct {},
+});
 
-const clock = zid.SystemClock.init(io); 
-const gen = try zid.Generator(UserId, zid.SystemClock).init(.{ .clock = &clock, .node = 1, });
+pub fn main(init: std.process.Init) !void {
+    var clock = zid.SystemClock.init(init.io);
 
-const id = try gen.next();
+    var gen = try zid.Generator(UserId, zid.SystemClock).init(.{
+        .clock = &clock,
+        .node = 1,
+    });
 
+    const id = try gen.next();
+}
+```
