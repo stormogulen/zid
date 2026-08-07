@@ -27,6 +27,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zid-type-safety", .path = "examples/type_safety/main.zig", .step_name = "run-type-safety", .desc = "Run zid type-safety example" },
         .{ .name = "zid-testing", .path = "examples/testing/main.zig", .step_name = "run-testing", .desc = "Run zid testing example" },
         .{ .name = "zid-threaded", .path = "examples/threaded/main.zig", .step_name = "run-threaded", .desc = "Run zid multithreaded example" },
+        .{ .name = "zid-ordering", .path = "examples/ordering/main.zig", .step_name = "run-ordering", .desc = "Id has stable ordering semantics" },
     };
     inline for (examples) |ex| {
         const mod = b.createModule(.{
