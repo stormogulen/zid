@@ -113,7 +113,6 @@ pub fn Generator(
 }
 
 test "first id starts at sequence zero" {
-
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 10,
@@ -134,7 +133,6 @@ test "first id starts at sequence zero" {
 }
 
 test "sequence increments within the same millisecond" {
-
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 10,
@@ -190,7 +188,6 @@ test "sequence exhaustion is reported, not silently wrapped" {
 }
 
 test "clock moving backwards is rejected" {
-
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 10,
@@ -214,7 +211,6 @@ test "clock moving backwards is rejected" {
 }
 
 test "invalid node is rejected at init" {
-
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 2, // max_node == 3
@@ -234,7 +230,6 @@ test "invalid node is rejected at init" {
 }
 
 test "custom epoch offsets stored timestamp; unixMillis recovers it" {
-
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 10,
@@ -257,7 +252,6 @@ test "custom epoch offsets stored timestamp; unixMillis recovers it" {
 }
 
 test "clock reading before the epoch is rejected" {
-
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 10,
@@ -277,7 +271,6 @@ test "clock reading before the epoch is rejected" {
 }
 
 test "clock reading exactly at the epoch yields timestamp zero" {
-
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 10,
