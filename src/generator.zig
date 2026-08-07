@@ -26,6 +26,7 @@ pub fn Generator(
 ) type {
     const max_node = IdType.Layout.node_mask;
     const max_sequence = IdType.Layout.sequence_mask;
+    const max_timestamp = IdType.Layout.timestamp_mask;
 
     return struct {
         const Self = @This();
@@ -64,6 +65,10 @@ pub fn Generator(
             }
 
             const timestamp = now - self.epoch.unix_millis;
+
+            if (timestamp > max_timestamp) {
+                return errors.Error.TimestampOverflow;
+            }
 
             if (self.last_timestamp) |last| {
                 if (timestamp < last) {
@@ -308,4 +313,32 @@ test "clock reading exactly at the epoch yields timestamp zero" {
 
     const id = try gen.next();
     try std.testing.expectEqual(@as(u64, 0), id.timestamp());
+}
+
+test "timestamp overflow is rejected" {
+    const std = @import("std");
+    const ordered = @import("ordered/ordered.zig");
+    const clock = @import("clock.zig");
+
+    // timestamp_bits = 2 means max_timestamp == 3.
+    const TestId = ordered.OrderedId(.{
+        .timestamp_bits = 2,
+        .node_bits = 10,
+        .sequence_bits = 12,
+        .tag = struct {},
+    });
+
+    // One past max_timestamp (3), with the default unix epoch (offset 0),
+    // so the epoch-relative timestamp equals the clock value directly.
+    var manual = clock.ManualClock{ .value = 4 };
+
+    var gen = try Generator(TestId, clock.ManualClock).init(.{
+        .node = 1,
+        .clock = &manual,
+    });
+
+    try std.testing.expectError(
+        error.TimestampOverflow,
+        gen.next(),
+    );
 }

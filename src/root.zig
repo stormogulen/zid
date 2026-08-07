@@ -39,4 +39,5 @@ test {
     _ = @import("generator.zig");
     _ = @import("clock.zig");
     _ = @import("epoch.zig");
+    _ = @import("encoding.zig");
 }

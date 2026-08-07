@@ -7,4 +7,5 @@ pub const Error = error{
     ClockMovedBackwards,
     SequenceExhausted,
     ClockBeforeEpoch,
+    TimestampOverflow,
 };
