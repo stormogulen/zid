@@ -76,10 +76,12 @@ pub fn Generator(
                 }
 
                 if (timestamp == last) {
+                    // sequence is about to become self.sequence + 1; reject if that would overflow
                     if (self.sequence >= max_sequence) {
                         return errors.Error.SequenceExhausted;
                     }
                     self.sequence += 1;
+                    std.debug.assert(self.sequence <= max_sequence);
                 } else {
                     self.sequence = 0;
                 }
