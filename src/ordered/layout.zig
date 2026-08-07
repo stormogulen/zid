@@ -91,9 +91,7 @@ pub fn Layout(comptime config: Config) type {
         pub fn unpack(raw: u64) Parts {
             return .{
                 .timestamp = (raw >> timestamp_shift) & timestamp_mask,
-
                 .node = (raw >> node_shift) & node_mask,
-
                 .sequence = raw & sequence_mask,
             };
         }
