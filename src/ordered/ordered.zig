@@ -237,21 +237,3 @@ test "parse rejects malformed strings" {
     try std.testing.expectError(error.InvalidLength, TestId.parse("TOOSHORT"));
     try std.testing.expectError(error.InvalidCharacter, TestId.parse("I000000000000"));
 }
-
-// test "format produces the expected string" {
-//     const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
-
-//     const id = try TestId.fromParts(1234, 7, 42);
-
-//     const formatted = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{id});
-//     defer std.testing.allocator.free(formatted);
-
-//     const expected = try std.fmt.allocPrint(
-//         std.testing.allocator,
-//         "OrderedId({d})[t=1234,n=7,s=42]",
-//         .{id.raw()},
-//     );
-//     defer std.testing.allocator.free(expected);
-
-//     try std.testing.expectEqualStrings(expected, formatted);
-// }
