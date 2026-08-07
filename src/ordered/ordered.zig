@@ -1,6 +1,6 @@
 //! Strongly typed OrderedId.
 //!
-//! "Two configs with different .tag values always produce
+//! Two configs with different .tag values always produce
 //! distinct types, even with identical bit widths.
 //!
 
