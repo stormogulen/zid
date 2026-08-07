@@ -17,8 +17,11 @@
 //! - Coordinate node ids across processes.
 //! - Guarantee correctness across threads (not thread-safe).
 
+const std = @import("std");
 const errors = @import("errors.zig");
 const epoch_mod = @import("epoch.zig");
+const ordered = @import("ordered/ordered.zig");
+const clock = @import("clock.zig");
 
 pub fn Generator(
     comptime IdType: type,
@@ -110,9 +113,6 @@ pub fn Generator(
 }
 
 test "first id starts at sequence zero" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
@@ -134,9 +134,6 @@ test "first id starts at sequence zero" {
 }
 
 test "sequence increments within the same millisecond" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
@@ -160,9 +157,6 @@ test "sequence increments within the same millisecond" {
 }
 
 test "sequence exhaustion is reported, not silently wrapped" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     // sequence_bits = 1 means max_sequence == 1.
     const TestId = ordered.OrderedId(.{
@@ -196,9 +190,6 @@ test "sequence exhaustion is reported, not silently wrapped" {
 }
 
 test "clock moving backwards is rejected" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
@@ -223,9 +214,6 @@ test "clock moving backwards is rejected" {
 }
 
 test "invalid node is rejected at init" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
@@ -246,9 +234,6 @@ test "invalid node is rejected at init" {
 }
 
 test "custom epoch offsets stored timestamp; unixMillis recovers it" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
@@ -272,9 +257,6 @@ test "custom epoch offsets stored timestamp; unixMillis recovers it" {
 }
 
 test "clock reading before the epoch is rejected" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
@@ -295,9 +277,6 @@ test "clock reading before the epoch is rejected" {
 }
 
 test "clock reading exactly at the epoch yields timestamp zero" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     const TestId = ordered.OrderedId(.{
         .timestamp_bits = 41,
@@ -318,9 +297,6 @@ test "clock reading exactly at the epoch yields timestamp zero" {
 }
 
 test "timestamp overflow is rejected" {
-    const std = @import("std");
-    const ordered = @import("ordered/ordered.zig");
-    const clock = @import("clock.zig");
 
     // timestamp_bits = 2 means max_timestamp == 3.
     const TestId = ordered.OrderedId(.{
