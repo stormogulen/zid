@@ -61,6 +61,12 @@ pub fn Generator(
         pub fn next(
             self: *Self,
         ) errors.Error!IdType {
+            // self.node is only ever set once, at init() (already validated
+            // there against max_node) — re-checking it here catches the
+            // struct having been corrupted or misused since, not just a
+            // bad argument at construction time.
+            std.debug.assert(self.node <= max_node);
+
             const now = self.clock.now();
 
             if (now < self.epoch.unix_millis) {
@@ -68,6 +74,9 @@ pub fn Generator(
             }
 
             const timestamp = now - self.epoch.unix_millis;
+            // Guarded by the check above: now >= epoch.unix_millis, so this
+            // subtraction cannot have wrapped.
+            std.debug.assert(timestamp <= now);
 
             if (timestamp > max_timestamp) {
                 return errors.Error.TimestampOverflow;
@@ -91,14 +100,27 @@ pub fn Generator(
             } else {
                 self.sequence = 0;
             }
+            // Second, broader check on the same invariant as the increment
+            // branch's assert above: whichever of the three branches ran,
+            // sequence must still be in range before it's packed below.
+            std.debug.assert(self.sequence <= max_sequence);
 
             self.last_timestamp = timestamp;
 
-            return IdType.fromParts(
+            const id = try IdType.fromParts(
                 timestamp,
                 self.node,
                 self.sequence,
             );
+
+            // The id we're about to hand back must actually decode to the
+            // values we just computed, not merely have been built without
+            // erroring.
+            std.debug.assert(id.timestamp() == timestamp);
+            std.debug.assert(id.node() == self.node);
+            std.debug.assert(id.sequence() == self.sequence);
+
+            return id;
         }
 
         /// Converts an id's decoded (epoch-relative) timestamp back
@@ -107,7 +129,9 @@ pub fn Generator(
             self: Self,
             id: IdType,
         ) u64 {
-            return id.timestamp() + self.epoch.unix_millis;
+            const result = id.timestamp() + self.epoch.unix_millis;
+            std.debug.assert(result >= self.epoch.unix_millis);
+            return result;
         }
     };
 }

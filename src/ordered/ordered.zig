@@ -39,13 +39,18 @@ pub fn OrderedId(
                 return errors.Error.FieldOutOfRange;
             }
 
-            return .{
+            const result = Self{
                 .raw_value = IdLayout.pack(
                     timestamp_value,
                     node_value,
                     sequence_value,
                 ),
             };
+            std.debug.assert(result.timestamp() == timestamp_value);
+            std.debug.assert(result.node() == node_value);
+            std.debug.assert(result.sequence() == sequence_value);
+
+            return result;
         }
 
         pub fn fromRaw(

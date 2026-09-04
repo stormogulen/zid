@@ -83,17 +83,33 @@ pub fn Layout(comptime config: Config) type {
             node: u64,
             sequence: u64,
         ) u64 {
+            // Callers (OrderedId.fromParts) are expected to have already
+            // rejected out-of-range fields; this re-checks the same
+            // invariant right where the masking would otherwise silently
+            // hide a violation, pairing with unpack()'s postcondition below.
+            std.debug.assert(timestamp <= timestamp_mask);
+            std.debug.assert(node <= node_mask);
+            std.debug.assert(sequence <= sequence_mask);
+
             return ((timestamp & timestamp_mask) << timestamp_shift) |
                 ((node & node_mask) << node_shift) |
                 ((sequence & sequence_mask) << sequence_shift);
         }
 
         pub fn unpack(raw: u64) Parts {
-            return .{
+            const parts = Parts{
                 .timestamp = (raw >> timestamp_shift) & timestamp_mask,
                 .node = (raw >> node_shift) & node_mask,
                 .sequence = raw & sequence_mask,
             };
+
+            // Pairs with pack()'s precondition asserts: whatever comes back
+            // out must still fit the same field widths that went in.
+            std.debug.assert(parts.timestamp <= timestamp_mask);
+            std.debug.assert(parts.node <= node_mask);
+            std.debug.assert(parts.sequence <= sequence_mask);
+
+            return parts;
         }
 
         //
