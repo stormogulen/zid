@@ -28,6 +28,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zid-testing", .path = "examples/testing/main.zig", .step_name = "run-testing", .desc = "Run zid testing example" },
         .{ .name = "zid-threaded", .path = "examples/threaded/main.zig", .step_name = "run-threaded", .desc = "Run zid multithreaded example" },
         .{ .name = "zid-ordering", .path = "examples/ordering/main.zig", .step_name = "run-ordering", .desc = "Id has stable ordering semantics" },
+        .{ .name = "zid-live-clock", .path = "examples/live_clock/main.zig", .step_name = "run-live-clock", .desc = "Generator + SystemClock under a real io runtime" },
     };
     inline for (examples) |ex| {
         const mod = b.createModule(.{
@@ -40,6 +41,16 @@ pub fn build(b: *std.Build) void {
             .name = ex.name,
             .root_module = mod,
         });
+
+        // Format all Zig source files in the project.
+        // const fmt_step = b.step("fmt", "Format Zig source files");
+        // const fmt_cmd = b.addSystemCommand(&.{
+        //     "zig",
+        //     "fmt",
+        //     ".",
+        // });
+        // fmt_step.dependOn(&fmt_cmd.step);
+
         const run_cmd = b.addRunArtifact(exe);
 
         if (b.args) |args| {
