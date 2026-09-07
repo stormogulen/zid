@@ -65,7 +65,7 @@ pub fn main(init: std.process.Init) !void {
 
         // Alternate 0ms/3ms so roughly half the calls land in the same
         // millisecond as the previous one and half don't.
-        const sleep_ms: u64 = if (i % 2 == 0) 0 else 3;
+        const sleep_ms: i64 = if (i % 2 == 0) 0 else 3;
         try io.sleep(.fromMilliseconds(sleep_ms), .awake);
     }
 
