@@ -51,7 +51,7 @@ fn benchGeneratorCost(io: std.Io) !Result {
                 exhausted_retries += 1;
                 continue;
             },
-            error.ClockBeforeEpoch,
+            error.BeforeEpoch,
             error.TimestampOverflow,
             error.ClockMovedBackwards,
             => return err,
@@ -85,7 +85,7 @@ fn benchRealThroughput(io: std.Io) !Result {
                 exhausted_retries += 1;
                 continue;
             },
-            error.ClockBeforeEpoch,
+            error.BeforeEpoch,
             error.TimestampOverflow,
             error.ClockMovedBackwards,
             => return err,

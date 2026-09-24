@@ -52,7 +52,7 @@ A couple of things worth knowing if you're adding a new identifier type:
 ## Examples & Tests
 
 ```sh
-zig build test              # run the unit test suite
+zig build test              # unit, property and fuzz-corpus tests
 zig build run                # basic Generator + decode walkthrough
 zig build run-type-safety    # compile-time type distinctness, eql correctness
 zig build run-testing        # deterministic testing with ManualClock
@@ -69,9 +69,9 @@ const UserId = zid.OrderedId(.{
 });
 
 pub fn main(init: std.process.Init) !void {
-    var clock = zid.SystemClock.init(init.io);
+    var clock = zid.MonotonicClock.init(init.io);
 
-    var gen = zid.Generator(UserId, zid.SystemClock).init(.{
+    var gen = zid.Generator(UserId, zid.MonotonicClock).init(.{
         .clock = &clock,
         .node = 1,
     });
@@ -80,6 +80,52 @@ pub fn main(init: std.process.Init) !void {
     _ = id;
 }
 ```
+
+### Clocks
+
+- `MonotonicClock` (recommended): reads the wall clock once at init,
+  then adds monotonic time. An NTP step or a manual change of the
+  system time can't make ids go backwards within the process.
+- `SystemClock`: reads the wall clock on every call, so it follows
+  every change to the system time. If it steps backwards, `next()`
+  returns `error.ClockMovedBackwards` until real time catches up.
+- `ManualClock`: set by hand, for deterministic tests.
+
+### Resuming after a restart
+
+Monotonicity only holds within one generator. To keep it across
+restarts, store the last issued id and resume from it:
+
+```zig
+var gen = try zid.Generator(UserId, zid.MonotonicClock).initAfter(.{
+    .clock = &clock,
+    .node = 1,
+}, last_issued_id); // error.NodeMismatch if it came from another node
+```
+
+Every new id is greater than `last_issued_id`. If the clock is behind
+it, `next()` reports `error.ClockMovedBackwards` rather than issuing a
+duplicate.
+
+### Ordering and range queries
+
+Ids order by timestamp, then node, then sequence:
+
+```zig
+std.mem.sort(UserId, ids, {}, UserId.lessThan);
+if (a.order(b) == .lt) { ... }
+```
+
+`minAt` and `maxAt` give the smallest and largest id any node can
+produce in a millisecond, which turns a time range into an id range:
+
+```zig
+const from = UserId.minAt(try gen.timestampFromUnixMillis(start_ms));
+const to = UserId.maxAt(try gen.timestampFromUnixMillis(end_ms));
+// WHERE id BETWEEN from.raw() AND to.raw()
+```
+
+### Boundaries
 
 Ids coming from outside (a database column, a URL) go through a
 checked boundary, which rejects anything this layout couldn't have
@@ -91,5 +137,6 @@ const from_url = try UserId.parse(text); // DecodeError or error.ReservedBitsSet
 ```
 
 Each fallible call returns only the errors it can actually produce
-(`zid.NextError`, `zid.RawError`, `zid.ParseError`,
-`zid.OverflowError`), so callers can `switch` over them exhaustively.
+(`zid.NextError`, `zid.TimestampError`, `zid.ResumeError`,
+`zid.RawError`, `zid.ParseError`, `zid.OverflowError`), so callers
+can `switch` over them exhaustively.

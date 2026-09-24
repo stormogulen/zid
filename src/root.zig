@@ -15,9 +15,12 @@ pub const Generator = generator_mod.Generator;
 pub const Epoch = epoch_mod.Epoch;
 
 pub const SystemClock = clock_mod.SystemClock;
+pub const MonotonicClock = clock_mod.MonotonicClock;
 pub const ManualClock = clock_mod.ManualClock;
 
+pub const TimestampError = errors_mod.TimestampError;
 pub const NextError = errors_mod.NextError;
+pub const ResumeError = errors_mod.ResumeError;
 pub const RawError = errors_mod.RawError;
 pub const ParseError = errors_mod.ParseError;
 pub const DecodeError = encoding_mod.DecodeError;
@@ -30,4 +33,5 @@ test {
     _ = @import("clock.zig");
     _ = @import("epoch.zig");
     _ = @import("encoding.zig");
+    _ = @import("properties.zig");
 }

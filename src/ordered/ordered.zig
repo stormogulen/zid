@@ -9,7 +9,9 @@
 //!   guarantee the values fit).
 //! - Accept raw values and strings from outside only after checking
 //!   that they could have been produced by this layout.
-//! - Decode, compare, format, and encode ids.
+//! - Decode, compare, order, format, and encode ids.
+//! - Give the smallest and largest possible id for a timestamp, for
+//!   range queries.
 //!
 //! Does NOT:
 //!
@@ -81,6 +83,37 @@ pub fn OrderedId(
         /// bits outside the layout at zero.
         pub fn eql(self: Self, other: Self) bool {
             return self.raw_value == other.raw_value;
+        }
+
+        /// Orders ids by timestamp first, then node, then sequence (the
+        /// order the fields are packed in). For ids from one generator
+        /// this is the order they were issued in. Across nodes it is
+        /// chronological to the millisecond, with ties broken by node.
+        pub fn order(self: Self, other: Self) std.math.Order {
+            return std.math.order(self.raw_value, other.raw_value);
+        }
+
+        /// For `std.mem.sort` and friends:
+        /// `std.mem.sort(UserId, ids, {}, UserId.lessThan)`.
+        pub fn lessThan(context: void, a: Self, b: Self) bool {
+            _ = context;
+            return a.order(b) == .lt;
+        }
+
+        /// The smallest id any node can produce at `at`. Together with
+        /// `maxAt`, turns a time range into an id range:
+        /// `WHERE id BETWEEN minAt(t0).raw() AND maxAt(t1).raw()`.
+        pub fn minAt(at: Timestamp) Self {
+            return fromParts(.{ .timestamp = at, .node = 0, .sequence = 0 });
+        }
+
+        /// The largest id any node can produce at `at`.
+        pub fn maxAt(at: Timestamp) Self {
+            return fromParts(.{
+                .timestamp = at,
+                .node = std.math.maxInt(Node),
+                .sequence = std.math.maxInt(Sequence),
+            });
         }
 
         /// Length of the string `toString` produces.
@@ -217,4 +250,31 @@ test "parse rejects a well-formed string whose value doesn't fit the layout" {
     // "8000000000000" encodes 1 << 63: valid Base32, but bit 63 is
     // outside this 63-bit layout.
     try std.testing.expectError(error.ReservedBitsSet, TestId.parse("8000000000000"));
+}
+
+test "order and lessThan follow timestamp, then node, then sequence" {
+    const a = TestId.fromParts(.{ .timestamp = 100, .node = 9, .sequence = 9 });
+    const b = TestId.fromParts(.{ .timestamp = 101, .node = 0, .sequence = 0 });
+    const c = TestId.fromParts(.{ .timestamp = 101, .node = 0, .sequence = 1 });
+
+    try std.testing.expectEqual(.lt, a.order(b));
+    try std.testing.expectEqual(.gt, c.order(b));
+    try std.testing.expectEqual(.eq, b.order(b));
+
+    var ids = [_]TestId{ c, a, b };
+    std.mem.sort(TestId, &ids, {}, TestId.lessThan);
+    try std.testing.expectEqualSlices(TestId, &.{ a, b, c }, &ids);
+}
+
+test "minAt and maxAt bound every id at that timestamp" {
+    const min = TestId.minAt(500);
+    const max = TestId.maxAt(500);
+    const inside = TestId.fromParts(.{ .timestamp = 500, .node = 3, .sequence = 7 });
+
+    try std.testing.expect(min.order(inside) != .gt);
+    try std.testing.expect(inside.order(max) != .gt);
+
+    // The neighbouring milliseconds fall outside.
+    try std.testing.expectEqual(.lt, TestId.maxAt(499).order(min));
+    try std.testing.expectEqual(.gt, TestId.minAt(501).order(max));
 }
