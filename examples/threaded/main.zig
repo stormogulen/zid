@@ -27,17 +27,58 @@ comptime {
     std.debug.assert(thread_count <= std.math.maxInt(WorkerId.Node) + 1);
 }
 
-fn worker(io: std.Io, node: WorkerId.Node, out: []WorkerId) !void {
-    var clock = zid.SystemClock.init(io);
+/// One thread's work: its own node id, its own region of the output
+/// buffer, and a place to report failure. Nothing here is shared with
+/// another thread.
+const Worker = struct {
+    node: WorkerId.Node,
+    out: []WorkerId,
+    /// Set if the worker stopped early. `out` is only fully written
+    /// when this is null.
+    err: ?zid.NextError = null,
 
-    var gen = zid.Generator(WorkerId, zid.SystemClock).init(.{
-        .node = node,
-        .clock = &clock,
-    });
+    fn run(self: *Worker, io: std.Io) void {
+        var clock = zid.MonotonicClock.init(io);
+        var gen = zid.Generator(WorkerId, zid.MonotonicClock).init(.{
+            .node = self.node,
+            .clock = &clock,
+        });
 
-    for (out) |*slot| {
-        slot.* = try gen.next();
+        var written: usize = 0;
+        while (written < self.out.len) {
+            self.out[written] = gen.next() catch |err| switch (err) {
+                // The millisecond is full: retry until the clock moves on.
+                error.SequenceExhausted => continue,
+                error.BeforeEpoch,
+                error.TimestampOverflow,
+                error.ClockMovedBackwards,
+                => {
+                    self.err = err;
+                    return;
+                },
+            };
+            written += 1;
+        }
     }
+};
+
+/// Runs every worker on its own thread and returns once all of them
+/// have finished. The workers write into memory the caller owns, so no
+/// thread may outlive this function, including when a spawn fails
+/// part-way.
+fn runAll(io: std.Io, workers: []Worker) !void {
+    var threads: [thread_count]std.Thread = undefined;
+    std.debug.assert(workers.len == threads.len);
+
+    var spawned: usize = 0;
+    errdefer for (threads[0..spawned]) |thread| thread.join();
+
+    for (workers, 0..) |*worker, i| {
+        threads[i] = try std.Thread.spawn(.{}, Worker.run, .{ worker, io });
+        spawned += 1;
+    }
+
+    for (threads) |thread| thread.join();
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -49,30 +90,38 @@ pub fn main(init: std.process.Init) !void {
     const ids = try gpa.alloc(WorkerId, thread_count * ids_per_thread);
     defer gpa.free(ids);
 
-    var threads: [thread_count]std.Thread = undefined;
-
-    for (0..thread_count) |i| {
-        // Distinct node id per thread == the uniqueness guarantee. The
-        // cast can't fail: thread_count is checked against Node above.
-        const node: WorkerId.Node = @intCast(i);
-        const slice = ids[i * ids_per_thread .. (i + 1) * ids_per_thread];
-        threads[i] = try std.Thread.spawn(.{}, worker, .{ init.io, node, slice });
+    var workers: [thread_count]Worker = undefined;
+    for (&workers, 0..) |*worker, i| {
+        worker.* = .{
+            // Distinct node id per thread == the uniqueness guarantee.
+            // The cast can't fail: thread_count is checked against Node
+            // above.
+            .node = @intCast(i),
+            .out = ids[i * ids_per_thread .. (i + 1) * ids_per_thread],
+        };
     }
 
-    for (threads) |t| t.join();
+    try runAll(init.io, &workers);
+
+    for (workers) |worker| {
+        if (worker.err) |err| {
+            std.debug.print("worker for node {d} failed: {t}\n", .{ worker.node, err });
+            return err;
+        }
+    }
 
     // Verify what the design promises: every id is unique across all
     // threads, and every id's node field matches the thread that
     // produced it.
-    var seen = std.AutoHashMap(u64, void).init(gpa);
-    defer seen.deinit();
-    try seen.ensureTotalCapacity(@intCast(ids.len));
+    var seen: std.AutoHashMapUnmanaged(u64, void) = .empty;
+    defer seen.deinit(gpa);
+    try seen.ensureTotalCapacity(gpa, @intCast(ids.len));
 
     for (ids, 0..) |id, idx| {
         const owner_thread = idx / ids_per_thread;
         std.debug.assert(id.node() == owner_thread);
 
-        const gop = try seen.getOrPut(id.raw());
+        const gop = seen.getOrPutAssumeCapacity(id.raw());
         std.debug.assert(!gop.found_existing); // no collisions across threads
     }
 

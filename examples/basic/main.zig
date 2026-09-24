@@ -7,9 +7,9 @@ const UserId = zid.OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence
 const app_epoch = zid.Epoch.fromUnixMillis(1_735_689_600_000); // 2025-01-01T00:00:00Z
 
 pub fn main(init: std.process.Init) !void {
-    var clock = zid.SystemClock.init(init.io);
+    var clock = zid.MonotonicClock.init(init.io);
 
-    var gen = zid.Generator(UserId, zid.SystemClock).init(.{
+    var gen = zid.Generator(UserId, zid.MonotonicClock).init(.{
         .node = 7,
         .clock = &clock,
         .epoch = app_epoch,

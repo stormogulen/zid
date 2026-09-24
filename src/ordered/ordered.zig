@@ -40,6 +40,14 @@ pub fn OrderedId(
         /// outside `IdLayout.used_mask`. Every constructor upholds this.
         raw_value: u64,
 
+        // "Zero-cost": an id is exactly one u64 in memory, so arrays of
+        // ids, hash map keys and struct fields cost no more than the
+        // raw integer would.
+        comptime {
+            std.debug.assert(@sizeOf(Self) == @sizeOf(u64));
+            std.debug.assert(@alignOf(Self) == @alignOf(u64));
+        }
+
         pub fn fromParts(parts: Parts) Self {
             const result: Self = .{ .raw_value = IdLayout.pack(parts) };
 

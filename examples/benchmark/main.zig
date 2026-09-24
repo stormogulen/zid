@@ -6,7 +6,7 @@
 //    so the numbers are pure CPU cost, with no waiting on real time.
 //
 // 2. Real throughput: how many ids per second you actually get under a
-//    SystemClock. With 12 sequence bits this is capped at 4096 ids per
+//    MonotonicClock. With 12 sequence bits this is capped at 4096 ids per
 //    millisecond (about 4.1 million per second), however fast next()
 //    is. When a millisecond is used up, the loop simply retries until
 //    the clock moves on, and counts how often that happened.
@@ -67,8 +67,8 @@ fn benchGeneratorCost(io: std.Io) !Result {
 }
 
 fn benchRealThroughput(io: std.Io) !Result {
-    var clock = zid.SystemClock.init(io);
-    var gen = zid.Generator(BenchId, zid.SystemClock).init(.{
+    var clock = zid.MonotonicClock.init(io);
+    var gen = zid.Generator(BenchId, zid.MonotonicClock).init(.{
         .node = 1,
         .clock = &clock,
     });
@@ -134,6 +134,6 @@ pub fn main(init: std.process.Init) !void {
     try report(writer, "Generator cost (ManualClock)", try benchGeneratorCost(io));
     try writer.flush();
 
-    try report(writer, "Real throughput (SystemClock)", try benchRealThroughput(io));
+    try report(writer, "Real throughput (MonotonicClock)", try benchRealThroughput(io));
     try writer.flush();
 }

@@ -1,5 +1,5 @@
 // Every other example either uses ManualClock (testing) or calls
-// SystemClock.next() a couple of times back-to-back (basic) -- both
+// gen.next() a couple of times back-to-back (basic) -- both
 // land in the same millisecond, so sequence never has to reset and
 // the clock-advance branch in Generator.next() never actually runs.
 //
@@ -24,9 +24,9 @@ const iterations = 20;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
-    var clock = zid.SystemClock.init(io);
+    var clock = zid.MonotonicClock.init(io);
 
-    var gen = zid.Generator(LiveId, zid.SystemClock).init(.{
+    var gen = zid.Generator(LiveId, zid.MonotonicClock).init(.{
         .node = 1,
         .clock = &clock,
     });
@@ -69,5 +69,5 @@ pub fn main(init: std.process.Init) !void {
         try io.sleep(.fromMilliseconds(sleep_ms), .awake);
     }
 
-    std.debug.print("\n{d} ids generated under a real SystemClock, all monotonic.\n", .{iterations});
+    std.debug.print("\n{d} ids generated under a real MonotonicClock, all monotonic.\n", .{iterations});
 }

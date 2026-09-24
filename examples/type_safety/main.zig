@@ -23,14 +23,14 @@ comptime {
 }
 
 pub fn main(init: std.process.Init) !void {
-    var clock = zid.SystemClock.init(init.io);
+    var clock = zid.MonotonicClock.init(init.io);
 
-    var user_gen = zid.Generator(UserId, zid.SystemClock).init(.{
+    var user_gen = zid.Generator(UserId, zid.MonotonicClock).init(.{
         .node = 7,
         .clock = &clock,
     });
 
-    var order_gen = zid.Generator(OrderId, zid.SystemClock).init(.{
+    var order_gen = zid.Generator(OrderId, zid.MonotonicClock).init(.{
         .node = 3,
         .clock = &clock,
     });
