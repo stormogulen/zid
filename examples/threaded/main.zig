@@ -66,9 +66,8 @@ const Worker = struct {
 /// have finished. The workers write into memory the caller owns, so no
 /// thread may outlive this function, including when a spawn fails
 /// part-way.
-fn runAll(io: std.Io, workers: []Worker) !void {
+fn runAll(io: std.Io, workers: *[thread_count]Worker) !void {
     var threads: [thread_count]std.Thread = undefined;
-    std.debug.assert(workers.len == threads.len);
 
     var spawned: usize = 0;
     errdefer for (threads[0..spawned]) |thread| thread.join();
@@ -79,6 +78,17 @@ fn runAll(io: std.Io, workers: []Worker) !void {
     }
 
     for (threads) |thread| thread.join();
+}
+
+/// Checks a result in every build mode. `std.debug.assert` is for
+/// programmer assumptions and is undefined behaviour when it fails in
+/// ReleaseFast; an example verifying what the library produced needs a
+/// check that always fails loudly.
+fn check(ok: bool, comptime what: []const u8) !void {
+    if (!ok) {
+        std.debug.print("check failed: " ++ what ++ "\n", .{});
+        return error.CheckFailed;
+    }
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -119,10 +129,10 @@ pub fn main(init: std.process.Init) !void {
 
     for (ids, 0..) |id, idx| {
         const owner_thread = idx / ids_per_thread;
-        std.debug.assert(id.node() == owner_thread);
+        try check(id.node() == owner_thread, "every id carries its thread's node");
 
         const gop = seen.getOrPutAssumeCapacity(id.raw());
-        std.debug.assert(!gop.found_existing); // no collisions across threads
+        try check(!gop.found_existing, "no collisions across threads");
     }
 
     std.debug.print(

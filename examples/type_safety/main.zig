@@ -22,6 +22,17 @@ comptime {
     std.debug.assert(UserId != OrderId);
 }
 
+/// Checks a result in every build mode. `std.debug.assert` is for
+/// programmer assumptions and is undefined behaviour when it fails in
+/// ReleaseFast; an example verifying what the library produced needs a
+/// check that always fails loudly.
+fn check(ok: bool, comptime what: []const u8) !void {
+    if (!ok) {
+        std.debug.print("check failed: " ++ what ++ "\n", .{});
+        return error.CheckFailed;
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     var clock = zid.MonotonicClock.init(init.io);
 
@@ -46,7 +57,7 @@ pub fn main(init: std.process.Init) !void {
         "user_id.eql(user_id) = {}\n",
         .{user_id.eql(user_id)},
     );
-    std.debug.assert(user_id.eql(user_id));
+    try check(user_id.eql(user_id), "an id equals itself");
 
     // Negative assertion: two ids generated back-to-back from the
     // same generator differ in sequence, so they are not equal —
@@ -56,5 +67,5 @@ pub fn main(init: std.process.Init) !void {
         "user_id.eql(another_user_id) = {}\n",
         .{user_id.eql(another_user_id)},
     );
-    std.debug.assert(!user_id.eql(another_user_id));
+    try check(!user_id.eql(another_user_id), "consecutive ids differ");
 }

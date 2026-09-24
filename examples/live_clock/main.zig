@@ -22,6 +22,17 @@ const LiveId = zid.OrderedId(.{
 
 const iterations = 20;
 
+/// Checks a result in every build mode. `std.debug.assert` is for
+/// programmer assumptions and is undefined behaviour when it fails in
+/// ReleaseFast; an example verifying what the library produced needs a
+/// check that always fails loudly.
+fn check(ok: bool, comptime what: []const u8) !void {
+    if (!ok) {
+        std.debug.print("check failed: " ++ what ++ "\n", .{});
+        return error.CheckFailed;
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     var clock = zid.MonotonicClock.init(io);
@@ -47,17 +58,17 @@ pub fn main(init: std.process.Init) !void {
 
             // Raw value must be strictly increasing regardless of
             // which branch produced it.
-            std.debug.assert(id.raw() > prev.raw());
+            try check(id.raw() > prev.raw(), "ids strictly increase");
 
             if (parts.timestamp == prev_parts.timestamp) {
                 // Same millisecond: sequence must have incremented by
                 // exactly one, not reset or jumped.
-                std.debug.assert(parts.sequence == prev_parts.sequence + 1);
+                try check(parts.sequence == prev_parts.sequence + 1, "sequence increments by exactly one");
             } else {
                 // Clock moved forward: sequence must have reset, and
                 // time must never run backwards.
-                std.debug.assert(parts.timestamp > prev_parts.timestamp);
-                std.debug.assert(parts.sequence == 0);
+                try check(parts.timestamp > prev_parts.timestamp, "time never runs backwards");
+                try check(parts.sequence == 0, "sequence resets in a new millisecond");
             }
         }
 

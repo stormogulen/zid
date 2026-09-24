@@ -54,11 +54,8 @@ pub const MonotonicClock = struct {
     }
 
     pub fn now(self: *MonotonicClock) u64 {
-        const elapsed_ns = self.start.untilNow(self.io, .boot).toNanoseconds();
-        std.debug.assert(elapsed_ns >= 0); // Monotonic: never before start.
-
-        const elapsed_ms: u64 = @intCast(@divTrunc(elapsed_ns, std.time.ns_per_ms));
-        return self.wall_at_start + elapsed_ms;
+        const elapsed = nanosToMillis(self.start.untilNow(self.io, .boot).toNanoseconds());
+        return self.wall_at_start +| elapsed;
     }
 };
 
@@ -80,8 +77,17 @@ pub const ManualClock = struct {
 };
 
 fn wallMillis(io: std.Io) u64 {
-    const timestamp = std.Io.Clock.now(.real, io);
-    return @intCast(@divTrunc(timestamp.nanoseconds, std.time.ns_per_ms));
+    return nanosToMillis(std.Io.Clock.now(.real, io).nanoseconds);
+}
+
+/// Clock readings come from the operating system, so they are input,
+/// not something to assert on. The wall clock is settable and can read
+/// before 1970; clamp instead of trusting it. A clamped reading then
+/// shows up as a proper error from the generator (`BeforeEpoch`,
+/// `ClockMovedBackwards` or `TimestampOverflow`), never as a crash or
+/// undefined behaviour.
+fn nanosToMillis(nanoseconds: i96) u64 {
+    return std.math.lossyCast(u64, @divTrunc(nanoseconds, std.time.ns_per_ms));
 }
 
 test "MonotonicClock starts at the wall clock and never goes backwards" {
@@ -100,4 +106,11 @@ test "MonotonicClock starts at the wall clock and never goes backwards" {
         try std.testing.expect(current >= previous);
         previous = current;
     }
+}
+
+test "clock readings outside u64 milliseconds are clamped, not trusted" {
+    try std.testing.expectEqual(0, nanosToMillis(-5 * std.time.ns_per_ms)); // Before 1970.
+    try std.testing.expectEqual(0, nanosToMillis(-1));
+    try std.testing.expectEqual(1_234, nanosToMillis(1_234 * std.time.ns_per_ms + 999));
+    try std.testing.expectEqual(std.math.maxInt(u64), nanosToMillis(std.math.maxInt(i96)));
 }

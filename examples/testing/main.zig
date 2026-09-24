@@ -8,6 +8,17 @@ const DeterministicId = zid.OrderedId(.{
     .tag = struct {},
 });
 
+/// Checks a result in every build mode. `std.debug.assert` is for
+/// programmer assumptions and is undefined behaviour when it fails in
+/// ReleaseFast; an example verifying what the library produced needs a
+/// check that always fails loudly.
+fn check(ok: bool, comptime what: []const u8) !void {
+    if (!ok) {
+        std.debug.print("check failed: " ++ what ++ "\n", .{});
+        return error.CheckFailed;
+    }
+}
+
 pub fn main() !void {
     var clock = zid.ManualClock{ .value = 1_000 };
 
@@ -21,15 +32,15 @@ pub fn main() !void {
     // flakiness in CI.
     const first = try gen.next();
     std.debug.print("first:  {f}\n", .{first});
-    std.debug.assert(first.timestamp() == 1_000);
-    std.debug.assert(first.sequence() == 0);
+    try check(first.timestamp() == 1_000, "timestamp is exactly the clock value");
+    try check(first.sequence() == 0, "first id starts at sequence 0");
 
     // Calling next() again without advancing the clock increments
     // sequence within the same millisecond.
     const second = try gen.next();
     std.debug.print("second: {f}\n", .{second});
-    std.debug.assert(second.timestamp() == 1_000);
-    std.debug.assert(second.sequence() == 1);
+    try check(second.timestamp() == 1_000, "same millisecond");
+    try check(second.sequence() == 1, "sequence increments within a millisecond");
 
     // Exhaust the (deliberately tiny) sequence field: 2 bits means
     // max_sequence == 3, so two more calls use up what's left.
@@ -37,10 +48,10 @@ pub fn main() !void {
     _ = try gen.next(); // sequence 3, field now full
 
     if (gen.next()) |_| {
-        unreachable; // sequence field is full; this must fail
+        return error.CheckFailed; // sequence field is full; this must fail
     } else |err| {
         std.debug.print("exhausted: {}\n", .{err});
-        std.debug.assert(err == error.SequenceExhausted);
+        try check(err == error.SequenceExhausted, "a full sequence field is reported");
     }
 
     // Advancing the clock resets sequence for the new millisecond —
@@ -49,17 +60,17 @@ pub fn main() !void {
     clock.advance(1);
     const after_tick = try gen.next();
     std.debug.print("after_tick: {f}\n", .{after_tick});
-    std.debug.assert(after_tick.timestamp() == 1_001);
-    std.debug.assert(after_tick.sequence() == 0);
+    try check(after_tick.timestamp() == 1_001, "timestamp follows the clock");
+    try check(after_tick.sequence() == 0, "sequence resets in a new millisecond");
 
     // A clock that moves backwards is rejected outright, rather than
     // silently producing an id that could collide with or precede
     // one already handed out.
     clock.set(500);
     if (gen.next()) |_| {
-        unreachable; // clock went backwards; this must fail
+        return error.CheckFailed; // clock went backwards; this must fail
     } else |err| {
         std.debug.print("backwards: {}\n", .{err});
-        std.debug.assert(err == error.ClockMovedBackwards);
+        try check(err == error.ClockMovedBackwards, "a backwards clock is rejected");
     }
 }
