@@ -26,7 +26,7 @@ pub fn main(init: std.process.Init) !void {
         .{
             first.raw(),
             first_parts.timestamp,
-            try gen.unixMillis(first),
+            try gen.unixMillisFromTimestamp(first.timestamp()),
             first_parts.node,
             first_parts.sequence,
         },
@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
         .{
             second.raw(),
             second_parts.timestamp,
-            try gen.unixMillis(second),
+            try gen.unixMillisFromTimestamp(second.timestamp()),
             second_parts.sequence,
         },
     );

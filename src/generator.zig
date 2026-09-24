@@ -23,8 +23,8 @@
 
 const std = @import("std");
 const errors = @import("errors.zig");
-const epoch_mod = @import("epoch.zig");
-const ordered = @import("ordered/ordered.zig");
+const Epoch = @import("epoch.zig").Epoch;
+const OrderedId = @import("ordered/id.zig").OrderedId;
 const clock = @import("clock.zig");
 
 pub fn Generator(
@@ -56,9 +56,15 @@ pub fn Generator(
         pub const Timestamp = IdType.Timestamp;
         pub const NextError = errors.NextError;
 
+        // Internal state. Zig has no private fields, so these are
+        // visible, but they are not part of the API: construct with
+        // init/initAfter and never write them afterwards. Changing
+        // `last` or `node` directly can break the monotonicity and
+        // uniqueness guarantees.
+
         clock: *ClockType,
         node: Node,
-        epoch: epoch_mod.Epoch,
+        epoch: Epoch,
         /// The most recently returned id, or null before the first
         /// call to next(). Its timestamp and sequence are all the
         /// state the generator needs.
@@ -70,7 +76,7 @@ pub fn Generator(
             /// boundary with `std.math.cast(Node, value)`.
             node: Node,
             clock: *ClockType,
-            epoch: epoch_mod.Epoch = .unix,
+            epoch: Epoch = .unix,
         };
 
         pub fn init(options: Options) Self {
@@ -139,10 +145,10 @@ pub fn Generator(
                 error.TimestampOverflow;
         }
 
-        /// Converts an id's decoded (epoch-relative) timestamp back
+        /// Converts an epoch-relative timestamp (for example `id.timestamp()`) back
         /// into Unix milliseconds, using this generator's epoch.
-        pub fn unixMillis(self: Self, id: IdType) errors.OverflowError!u64 {
-            return std.math.add(u64, id.timestamp(), self.epoch.unix_millis);
+        pub fn unixMillisFromTimestamp(self: Self, timestamp: Timestamp) errors.OverflowError!u64 {
+            return std.math.add(u64, timestamp, self.epoch.unix_millis);
         }
     };
 }
@@ -154,7 +160,7 @@ fn isContainer(comptime T: type) bool {
     };
 }
 
-const TestId = ordered.OrderedId(.{
+const TestId = OrderedId(.{
     .timestamp_bits = 41,
     .node_bits = 10,
     .sequence_bits = 12,
@@ -192,7 +198,7 @@ test "sequence increments within the same millisecond" {
 test "sequence exhaustion is reported, not silently wrapped" {
 
     // sequence_bits = 1 means max_sequence == 1.
-    const TinySequenceId = ordered.OrderedId(.{
+    const TinySequenceId = OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 10,
         .sequence_bits = 1,
@@ -238,19 +244,19 @@ test "clock moving backwards is rejected" {
     );
 }
 
-test "custom epoch offsets stored timestamp; unixMillis recovers it" {
+test "custom epoch offsets stored timestamp; unixMillisFromTimestamp recovers it" {
     var manual = clock.ManualClock{ .value = 1_700_000_500 };
 
     var gen = Generator(TestId, clock.ManualClock).init(.{
         .node = 1,
         .clock = &manual,
-        .epoch = epoch_mod.Epoch.fromUnixMillis(1_700_000_000),
+        .epoch = Epoch.fromUnixMillis(1_700_000_000),
     });
 
     const id = try gen.next();
 
     try std.testing.expectEqual(500, id.timestamp());
-    try std.testing.expectEqual(1_700_000_500, try gen.unixMillis(id));
+    try std.testing.expectEqual(1_700_000_500, try gen.unixMillisFromTimestamp(id.timestamp()));
 }
 
 test "clock reading before the epoch is rejected" {
@@ -259,7 +265,7 @@ test "clock reading before the epoch is rejected" {
     var gen = Generator(TestId, clock.ManualClock).init(.{
         .node = 1,
         .clock = &manual,
-        .epoch = epoch_mod.Epoch.fromUnixMillis(1_000),
+        .epoch = Epoch.fromUnixMillis(1_000),
     });
 
     try std.testing.expectError(error.BeforeEpoch, gen.next());
@@ -270,7 +276,7 @@ test "clock reading exactly at the epoch yields timestamp zero" {
     var gen = Generator(TestId, clock.ManualClock).init(.{
         .node = 1,
         .clock = &manual,
-        .epoch = epoch_mod.Epoch.fromUnixMillis(1_000),
+        .epoch = Epoch.fromUnixMillis(1_000),
     });
 
     const id = try gen.next();
@@ -280,7 +286,7 @@ test "clock reading exactly at the epoch yields timestamp zero" {
 test "timestamp overflow is rejected" {
 
     // timestamp_bits = 2 means max_timestamp == 3.
-    const TinyTimestampId = ordered.OrderedId(.{
+    const TinyTimestampId = OrderedId(.{
         .timestamp_bits = 2,
         .node_bits = 10,
         .sequence_bits = 12,
@@ -303,7 +309,7 @@ test "timestamp overflow is rejected" {
 }
 
 test "a layout without sequence bits allows one id per millisecond" {
-    const NoSequenceId = ordered.OrderedId(.{
+    const NoSequenceId = OrderedId(.{
         .timestamp_bits = 41,
         .node_bits = 10,
         .sequence_bits = 0,
@@ -323,7 +329,7 @@ test "a layout without sequence bits allows one id per millisecond" {
     _ = try gen.next();
 }
 
-test "unixMillis reports overflow instead of wrapping" {
+test "unixMillisFromTimestamp reports overflow instead of wrapping" {
     var manual = clock.ManualClock{};
     const gen = Generator(TestId, clock.ManualClock).init(.{
         .node = 1,
@@ -332,7 +338,7 @@ test "unixMillis reports overflow instead of wrapping" {
     });
 
     const id = TestId.fromParts(.{ .timestamp = 11, .node = 1, .sequence = 0 });
-    try std.testing.expectError(error.Overflow, gen.unixMillis(id));
+    try std.testing.expectError(error.Overflow, gen.unixMillisFromTimestamp(id.timestamp()));
 }
 
 test "initAfter continues after the last id instead of repeating it" {

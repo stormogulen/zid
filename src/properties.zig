@@ -10,7 +10,7 @@
 //! `zig build test --fuzz` to fuzz them continuously.
 
 const std = @import("std");
-const ordered = @import("ordered/ordered.zig");
+const OrderedId = @import("ordered/id.zig").OrderedId;
 const generator = @import("generator.zig");
 const clock = @import("clock.zig");
 const encoding = @import("encoding.zig");
@@ -18,11 +18,11 @@ const encoding = @import("encoding.zig");
 const iterations = 10_000;
 
 const layouts = [_]type{
-    ordered.OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} }),
-    ordered.OrderedId(.{ .timestamp_bits = 1, .node_bits = 1, .sequence_bits = 1, .tag = struct {} }),
-    ordered.OrderedId(.{ .timestamp_bits = 32, .node_bits = 0, .sequence_bits = 0, .tag = struct {} }),
-    ordered.OrderedId(.{ .timestamp_bits = 52, .node_bits = 0, .sequence_bits = 12, .tag = struct {} }),
-    ordered.OrderedId(.{ .timestamp_bits = 64, .node_bits = 0, .sequence_bits = 0, .tag = struct {} }),
+    OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} }),
+    OrderedId(.{ .timestamp_bits = 1, .node_bits = 1, .sequence_bits = 1, .tag = struct {} }),
+    OrderedId(.{ .timestamp_bits = 32, .node_bits = 0, .sequence_bits = 0, .tag = struct {} }),
+    OrderedId(.{ .timestamp_bits = 52, .node_bits = 0, .sequence_bits = 12, .tag = struct {} }),
+    OrderedId(.{ .timestamp_bits = 64, .node_bits = 0, .sequence_bits = 0, .tag = struct {} }),
 };
 
 fn randomParts(comptime Id: type, random: std.Random) Id.Parts {
@@ -99,7 +99,7 @@ test "property: minAt and maxAt bound every id at their timestamp" {
 
 test "property: a generator's ids strictly increase under a random clock" {
     // Small sequence field, so exhaustion happens often.
-    const Id = ordered.OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 3, .tag = struct {} });
+    const Id = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 3, .tag = struct {} });
 
     var prng: std.Random.DefaultPrng = .init(0xc10c);
     const random = prng.random();

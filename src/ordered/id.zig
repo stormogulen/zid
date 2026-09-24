@@ -27,7 +27,16 @@ pub fn OrderedId(
 ) type {
     const IdLayout = layout.Layout(config);
 
-    return struct {
+    // A non-exhaustive enum rather than a struct with a u64 field: Zig
+    // has no private fields, and a public field would let anyone write
+    // a value with reserved bits set. An enum has no field to write; the
+    // only ways in are the constructors below, or an explicit
+    // `@enumFromInt` that is visibly the caller's responsibility.
+    return enum(u64) {
+        /// Always a value `IdLayout.pack` could produce: no bits set
+        /// outside `IdLayout.used_mask`. Every constructor upholds this.
+        _,
+
         const Self = @This();
 
         pub const Layout = IdLayout;
@@ -35,10 +44,6 @@ pub fn OrderedId(
         pub const Timestamp = IdLayout.Timestamp;
         pub const Node = IdLayout.Node;
         pub const Sequence = IdLayout.Sequence;
-
-        /// Always a value `IdLayout.pack` could produce: no bits set
-        /// outside `IdLayout.used_mask`. Every constructor upholds this.
-        raw_value: u64,
 
         // "Zero-cost": an id is exactly one u64 in memory, so arrays of
         // ids, hash map keys and struct fields cost no more than the
@@ -49,7 +54,7 @@ pub fn OrderedId(
         }
 
         pub fn fromParts(parts: Parts) Self {
-            const result: Self = .{ .raw_value = IdLayout.pack(parts) };
+            const result: Self = @enumFromInt(IdLayout.pack(parts));
 
             // Pairs with decode(): what goes in must come back out.
             std.debug.assert(std.meta.eql(result.decode(), parts));
@@ -64,15 +69,15 @@ pub fn OrderedId(
             if (raw_value & ~IdLayout.used_mask != 0) {
                 return error.ReservedBitsSet;
             }
-            return .{ .raw_value = raw_value };
+            return @enumFromInt(raw_value);
         }
 
         pub fn raw(self: Self) u64 {
-            return self.raw_value;
+            return @intFromEnum(self);
         }
 
         pub fn decode(self: Self) Parts {
-            return IdLayout.unpack(self.raw_value);
+            return IdLayout.unpack(self.raw());
         }
 
         pub fn timestamp(self: Self) Timestamp {
@@ -87,10 +92,11 @@ pub fn OrderedId(
             return self.decode().sequence;
         }
 
-        /// Raw comparison is exact because every constructor keeps the
-        /// bits outside the layout at zero.
+        /// Same as `a == b`, which also works on ids. Raw comparison is
+        /// exact because every constructor keeps the bits outside the
+        /// layout at zero.
         pub fn eql(self: Self, other: Self) bool {
-            return self.raw_value == other.raw_value;
+            return self == other;
         }
 
         /// Orders ids by timestamp first, then node, then sequence (the
@@ -98,7 +104,7 @@ pub fn OrderedId(
         /// this is the order they were issued in. Across nodes it is
         /// chronological to the millisecond, with ties broken by node.
         pub fn order(self: Self, other: Self) std.math.Order {
-            return std.math.order(self.raw_value, other.raw_value);
+            return std.math.order(self.raw(), other.raw());
         }
 
         /// For `std.mem.sort` and friends:
@@ -133,7 +139,7 @@ pub fn OrderedId(
         /// stay chronologically sortable as text (in a URL, a log
         /// line, a database column, ...).
         pub fn toString(self: Self) [encoding.encoded_len]u8 {
-            return encoding.encode(self.raw_value);
+            return encoding.encode(self.raw());
         }
 
         /// Decodes a string produced by `toString` back into an id.
@@ -149,7 +155,7 @@ pub fn OrderedId(
 
             try writer.print(
                 "OrderedId({d})[t={d},n={d},s={d}]",
-                .{ self.raw_value, parts.timestamp, parts.node, parts.sequence },
+                .{ self.raw(), parts.timestamp, parts.node, parts.sequence },
             );
         }
     };
@@ -285,4 +291,12 @@ test "minAt and maxAt bound every id at that timestamp" {
     // The neighbouring milliseconds fall outside.
     try std.testing.expectEqual(.lt, TestId.maxAt(499).order(min));
     try std.testing.expectEqual(.gt, TestId.minAt(501).order(max));
+}
+
+test "ids compare with == as well as eql" {
+    const a = TestId.fromParts(.{ .timestamp = 1, .node = 2, .sequence = 3 });
+    const b = TestId.fromParts(.{ .timestamp = 1, .node = 2, .sequence = 3 });
+
+    try std.testing.expect(a == b);
+    try std.testing.expect(a.eql(b));
 }

@@ -1,34 +1,33 @@
 //! zid public API.
 
-const ordered_id = @import("ordered/ordered.zig");
 const layout = @import("ordered/layout.zig");
-const generator_mod = @import("generator.zig");
-const clock_mod = @import("clock.zig");
-const errors_mod = @import("errors.zig");
-const epoch_mod = @import("epoch.zig");
-const encoding_mod = @import("encoding.zig");
+const generator = @import("generator.zig");
+const clock = @import("clock.zig");
+const errors = @import("errors.zig");
+const epoch = @import("epoch.zig");
+const encoding = @import("encoding.zig");
 
-pub const OrderedId = ordered_id.OrderedId;
+pub const OrderedId = @import("ordered/id.zig").OrderedId;
 pub const Config = layout.Config;
 
-pub const Generator = generator_mod.Generator;
-pub const Epoch = epoch_mod.Epoch;
+pub const Generator = generator.Generator;
+pub const Epoch = epoch.Epoch;
 
-pub const SystemClock = clock_mod.SystemClock;
-pub const MonotonicClock = clock_mod.MonotonicClock;
-pub const ManualClock = clock_mod.ManualClock;
+pub const SystemClock = clock.SystemClock;
+pub const MonotonicClock = clock.MonotonicClock;
+pub const ManualClock = clock.ManualClock;
 
-pub const TimestampError = errors_mod.TimestampError;
-pub const NextError = errors_mod.NextError;
-pub const ResumeError = errors_mod.ResumeError;
-pub const RawError = errors_mod.RawError;
-pub const ParseError = errors_mod.ParseError;
-pub const DecodeError = encoding_mod.DecodeError;
-pub const OverflowError = errors_mod.OverflowError;
+pub const TimestampError = errors.TimestampError;
+pub const NextError = errors.NextError;
+pub const ResumeError = errors.ResumeError;
+pub const RawError = errors.RawError;
+pub const ParseError = errors.ParseError;
+pub const DecodeError = encoding.DecodeError;
+pub const OverflowError = errors.OverflowError;
 
 test {
     _ = @import("ordered/layout.zig");
-    _ = @import("ordered/ordered.zig");
+    _ = @import("ordered/id.zig");
     _ = @import("generator.zig");
     _ = @import("clock.zig");
     _ = @import("epoch.zig");
