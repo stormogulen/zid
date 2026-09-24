@@ -23,7 +23,6 @@ pub const ResumeError = errors.ResumeError;
 pub const RawError = errors.RawError;
 pub const ParseError = errors.ParseError;
 pub const DecodeError = encoding.DecodeError;
-pub const OverflowError = errors.OverflowError;
 
 test {
     _ = @import("ordered/layout.zig");

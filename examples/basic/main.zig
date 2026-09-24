@@ -1,10 +1,16 @@
 const std = @import("std");
 const zid = @import("zid");
 
-const UserId = zid.OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
-
-// An arbitrary recent reference point instead of 1970  from Unix epoch directly.
-const app_epoch = zid.Epoch.fromUnixMillis(1_735_689_600_000); // 2025-01-01T00:00:00Z
+// A recent reference point instead of 1970, so the 41 timestamp bits
+// last until about 2094 instead of 2039. The epoch is part of the id
+// type: ids with a different epoch are a different type.
+const UserId = zid.OrderedId(.{
+    .timestamp_bits = 41,
+    .node_bits = 10,
+    .sequence_bits = 12,
+    .tag = struct {},
+    .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
+});
 
 pub fn main(init: std.process.Init) !void {
     var clock = zid.MonotonicClock.init(init.io);
@@ -12,7 +18,6 @@ pub fn main(init: std.process.Init) !void {
     var gen = zid.Generator(UserId, zid.MonotonicClock).init(.{
         .node = 7,
         .clock = &clock,
-        .epoch = app_epoch,
     });
 
     const first = try gen.next();
@@ -26,7 +31,7 @@ pub fn main(init: std.process.Init) !void {
         .{
             first.raw(),
             first_parts.timestamp,
-            try gen.unixMillisFromTimestamp(first.timestamp()),
+            first.unixMillis(),
             first_parts.node,
             first_parts.sequence,
         },
@@ -37,7 +42,7 @@ pub fn main(init: std.process.Init) !void {
         .{
             second.raw(),
             second_parts.timestamp,
-            try gen.unixMillisFromTimestamp(second.timestamp()),
+            second.unixMillis(),
             second_parts.sequence,
         },
     );

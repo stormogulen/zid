@@ -15,12 +15,17 @@
 //! - Maintain state.
 
 const std = @import("std");
+const Epoch = @import("../epoch.zig").Epoch;
 
 pub const Config = struct {
     timestamp_bits: u8,
     node_bits: u8,
     sequence_bits: u8,
+    /// Makes ids with otherwise identical configs distinct types.
     tag: type,
+    /// What the timestamp counts from. Part of the id's format: ids
+    /// with different epochs are different types, and can't be mixed.
+    epoch: Epoch = .unix,
 };
 
 pub fn Layout(comptime config: Config) type {

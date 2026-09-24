@@ -120,10 +120,33 @@ if (a.order(b) == .lt) { ... }
 produce in a millisecond, which turns a time range into an id range:
 
 ```zig
-const from = UserId.minAt(try gen.timestampFromUnixMillis(start_ms));
-const to = UserId.maxAt(try gen.timestampFromUnixMillis(end_ms));
+const from = UserId.minAt(try UserId.timestampFromUnixMillis(start_ms));
+const to = UserId.maxAt(try UserId.timestampFromUnixMillis(end_ms));
 // WHERE id BETWEEN from.raw() AND to.raw()
 ```
+
+No generator is needed for this: the conversions live on the id type.
+
+### Epochs
+
+The epoch is part of the id type, set in its config. A recent epoch
+makes the timestamp bits last longer (41 bits last about 69 years):
+
+```zig
+const UserId = zid.OrderedId(.{
+    .timestamp_bits = 41,
+    .node_bits = 10,
+    .sequence_bits = 12,
+    .tag = struct {},
+    .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
+});
+
+const created_at = id.unixMillis();
+```
+
+Ids with different epochs are different types, so they can't be mixed
+by accident. An epoch so late that the largest timestamp would overflow
+u64 Unix milliseconds is a compile error.
 
 ### Boundaries
 
@@ -133,10 +156,10 @@ produced:
 
 ```zig
 const from_db = try UserId.fromRaw(raw_value); // error.ReservedBitsSet
-const from_url = try UserId.parse(text); // DecodeError or error.ReservedBitsSet
+const from_url = try UserId.parse(text); // zid.DecodeError or error.ReservedBitsSet
 ```
 
 Each fallible call returns only the errors it can actually produce
 (`zid.NextError`, `zid.TimestampError`, `zid.ResumeError`,
-`zid.RawError`, `zid.ParseError`, `zid.OverflowError`), so callers
-can `switch` over them exhaustively.
+`zid.RawError`, `zid.ParseError`), so callers can `switch` over them
+exhaustively.

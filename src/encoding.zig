@@ -52,9 +52,12 @@ pub const DecodeError = error{
     /// Input contained a byte outside the Crockford alphabet.
     InvalidCharacter,
     /// The leading character encoded a value greater than 4 bits can
-    /// hold. Such a string could never have come from `encode`, and
-    /// decoding it as-is would silently misinterpret bits.
-    Overflow,
+    /// hold, so the string represents a number larger than a u64. Such
+    /// a string could never have come from `encode`, and decoding it
+    /// as-is would silently misinterpret bits. (Deliberately not
+    /// `error.Overflow`: Zig error names are global, and that name
+    /// already means arithmetic overflow in `std.math`.)
+    ValueTooLarge,
 };
 
 /// Encodes `value` as a fixed-width, sort-preserving string.
@@ -87,7 +90,7 @@ pub fn decode(s: []const u8) DecodeError!u64 {
         return DecodeError.InvalidCharacter;
     }
     if (first > 0xF) {
-        return DecodeError.Overflow;
+        return DecodeError.ValueTooLarge;
     }
 
     var value: u64 = first;
@@ -153,7 +156,7 @@ test "decode rejects characters outside the alphabet" {
 test "decode rejects a leading character that doesn't fit in 4 bits" {
     // 'G' is alphabet index 16 (0x10), which needs 5 bits -- too
     // wide for the leading character's 4-bit budget.
-    try std.testing.expectError(error.Overflow, decode("G000000000000"));
+    try std.testing.expectError(error.ValueTooLarge, decode("G000000000000"));
 
     // 'F' is alphabet index 15 (0xF), which fits exactly.
     _ = try decode("F000000000000");

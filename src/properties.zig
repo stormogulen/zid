@@ -181,7 +181,7 @@ fn fuzzParse(context: void, smith: *std.testing.Smith) anyerror!void {
 
     const id = FuzzId.parse(input) catch |err| switch (err) {
         // Rejecting is always allowed; misreading is not.
-        error.InvalidLength, error.InvalidCharacter, error.Overflow, error.ReservedBitsSet => return,
+        error.InvalidLength, error.InvalidCharacter, error.ValueTooLarge, error.ReservedBitsSet => return,
     };
 
     // Anything parse accepts must be a value the layout can produce...

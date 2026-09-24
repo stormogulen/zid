@@ -5,10 +5,10 @@
 
 const encoding = @import("encoding.zig");
 
-/// Converting Unix milliseconds to a layout timestamp
-/// (`Generator.timestampFromUnixMillis`, and as part of `Generator.next`).
+/// Converting Unix milliseconds to an id's timestamp
+/// (`OrderedId.timestampFromUnixMillis`, and as part of `Generator.next`).
 pub const TimestampError = error{
-    /// The time is earlier than the generator's epoch.
+    /// The time is earlier than the id type's epoch.
     BeforeEpoch,
     /// The epoch-relative timestamp doesn't fit the layout's timestamp
     /// field.
@@ -38,9 +38,3 @@ pub const RawError = error{
 
 /// `OrderedId.parse`.
 pub const ParseError = encoding.DecodeError || RawError;
-
-/// `Generator.unixMillis`, `Epoch.fromUnixSeconds`.
-pub const OverflowError = error{
-    /// The result does not fit in a u64 of Unix milliseconds.
-    Overflow,
-};

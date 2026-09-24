@@ -12,6 +12,8 @@
 //! - Decode, compare, order, format, and encode ids.
 //! - Give the smallest and largest possible id for a timestamp, for
 //!   range queries.
+//! - Convert between its epoch-relative timestamps and Unix
+//!   milliseconds, using the epoch in its Config.
 //!
 //! Does NOT:
 //!
@@ -21,11 +23,22 @@ const std = @import("std");
 const layout = @import("layout.zig");
 const errors = @import("../errors.zig");
 const encoding = @import("../encoding.zig");
+const Epoch = @import("../epoch.zig").Epoch;
 
 pub fn OrderedId(
     comptime config: layout.Config,
 ) type {
     const IdLayout = layout.Layout(config);
+
+    comptime {
+        // Every timestamp this layout can hold must map to a valid
+        // Unix millisecond, so converting an id back to wall-clock time
+        // can never overflow.
+        const max_timestamp = std.math.maxInt(IdLayout.Timestamp);
+        if (config.epoch.unix_millis > std.math.maxInt(u64) - max_timestamp) {
+            @compileError("OrderedId epoch plus the largest timestamp doesn't fit in u64 Unix milliseconds");
+        }
+    }
 
     // A non-exhaustive enum rather than a struct with a u64 field: Zig
     // has no private fields, and a public field would let anyone write
@@ -44,6 +57,9 @@ pub fn OrderedId(
         pub const Timestamp = IdLayout.Timestamp;
         pub const Node = IdLayout.Node;
         pub const Sequence = IdLayout.Sequence;
+
+        /// What this id type's timestamps count from.
+        pub const epoch: Epoch = config.epoch;
 
         // "Zero-cost": an id is exactly one u64 in memory, so arrays of
         // ids, hash map keys and struct fields cost no more than the
@@ -90,6 +106,29 @@ pub fn OrderedId(
 
         pub fn sequence(self: Self) Sequence {
             return self.decode().sequence;
+        }
+
+        /// When this id was created, in Unix milliseconds.
+        pub fn unixMillis(self: Self) u64 {
+            return unixMillisFromTimestamp(self.timestamp());
+        }
+
+        /// Converts Unix milliseconds into this id type's
+        /// epoch-relative timestamp. Pair with `minAt`/`maxAt` to turn a
+        /// time range into an id range.
+        pub fn timestampFromUnixMillis(unix_millis: u64) errors.TimestampError!Timestamp {
+            if (unix_millis < epoch.unix_millis) {
+                return error.BeforeEpoch;
+            }
+            return std.math.cast(Timestamp, unix_millis - epoch.unix_millis) orelse
+                error.TimestampOverflow;
+        }
+
+        /// Converts an epoch-relative timestamp back into Unix
+        /// milliseconds. Can't overflow: checked for this Config at
+        /// compile time.
+        pub fn unixMillisFromTimestamp(at: Timestamp) u64 {
+            return epoch.unix_millis + at;
         }
 
         /// Same as `a == b`, which also works on ids. Raw comparison is
@@ -299,4 +338,36 @@ test "ids compare with == as well as eql" {
 
     try std.testing.expect(a == b);
     try std.testing.expect(a.eql(b));
+}
+
+const app_epoch: Epoch = .fromUnixMillis(1_735_689_600_000); // 2025-01-01T00:00:00Z
+const AppId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {}, .epoch = app_epoch });
+
+test "timestamps count from the epoch in the Config" {
+    const id = AppId.fromParts(.{ .timestamp = 500, .node = 1, .sequence = 0 });
+
+    try std.testing.expectEqual(1_735_689_600_500, id.unixMillis());
+    try std.testing.expectEqual(500, try AppId.timestampFromUnixMillis(1_735_689_600_500));
+    try std.testing.expectEqual(0, try AppId.timestampFromUnixMillis(app_epoch.unix_millis));
+}
+
+test "timestampFromUnixMillis rejects times before the epoch and past the layout" {
+    try std.testing.expectError(error.BeforeEpoch, AppId.timestampFromUnixMillis(app_epoch.unix_millis - 1));
+    try std.testing.expectError(
+        error.TimestampOverflow,
+        AppId.timestampFromUnixMillis(app_epoch.unix_millis + std.math.maxInt(AppId.Timestamp) + 1),
+    );
+}
+
+test "ids with different epochs are different types" {
+    const UnixId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
+    try std.testing.expect(UnixId != AppId);
+}
+
+test "a time range becomes an id range" {
+    const from = AppId.minAt(try AppId.timestampFromUnixMillis(app_epoch.unix_millis + 100));
+    const to = AppId.maxAt(try AppId.timestampFromUnixMillis(app_epoch.unix_millis + 200));
+
+    const inside = AppId.fromParts(.{ .timestamp = 150, .node = 7, .sequence = 3 });
+    try std.testing.expect(from.order(inside) == .lt and inside.order(to) == .lt);
 }
