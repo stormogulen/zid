@@ -19,9 +19,11 @@ A small, zero-cost, compile-time verified ordered identity primitive.
 
 - **Single-threaded** — `Generator` is not safe to share across threads;
   no locking is used, which is part of how it stays zero-cost.
-- **Node id assignment is out of scope** — the library validates that a
-  node id fits the configured bits, but assigning unique ids across a
-  fleet is left to the caller.
+- **Node id assignment is out of scope** — node ids are typed to the
+  configured width (`UserId.Node` is a `u10` for 10 node bits), so an
+  out-of-range node can't be passed in. Converting a runtime integer is
+  the caller's boundary: `std.math.cast(UserId.Node, value)`. Assigning
+  unique ids across a fleet is left to the caller.
 
 ## Extending zid
 
@@ -68,11 +70,25 @@ const UserId = zid.OrderedId(.{
 pub fn main(init: std.process.Init) !void {
     var clock = zid.SystemClock.init(init.io);
 
-    var gen = try zid.Generator(UserId, zid.SystemClock).init(.{
+    var gen = zid.Generator(UserId, zid.SystemClock).init(.{
         .clock = &clock,
         .node = 1,
     });
 
     const id = try gen.next();
+    _ = id;
 }
 ```
+
+Ids coming from outside (a database column, a URL) go through a
+checked boundary, which rejects anything this layout couldn't have
+produced:
+
+```zig
+const from_db = try UserId.fromRaw(raw_value); // error.ReservedBitsSet
+const from_url = try UserId.parse(text); // DecodeError or error.ReservedBitsSet
+```
+
+Each fallible call returns only the errors it can actually produce
+(`zid.NextError`, `zid.RawError`, `zid.ParseError`,
+`zid.OverflowError`), so callers can `switch` over them exhaustively.

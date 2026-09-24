@@ -3,6 +3,17 @@
 //! Two configs with different .tag values always produce
 //! distinct types, even with identical bit widths.
 //!
+//! Responsibilities:
+//!
+//! - Build ids from typed fields (infallible: the field types already
+//!   guarantee the values fit).
+//! - Accept raw values and strings from outside only after checking
+//!   that they could have been produced by this layout.
+//! - Decode, compare, format, and encode ids.
+//!
+//! Does NOT:
+//!
+//! - Generate ids or read clocks (see Generator).
 
 const std = @import("std");
 const layout = @import("layout.zig");
@@ -17,86 +28,58 @@ pub fn OrderedId(
     return struct {
         const Self = @This();
 
-        pub const Parts = layout.Parts;
         pub const Layout = IdLayout;
+        pub const Parts = IdLayout.Parts;
+        pub const Timestamp = IdLayout.Timestamp;
+        pub const Node = IdLayout.Node;
+        pub const Sequence = IdLayout.Sequence;
 
+        /// Always a value `IdLayout.pack` could produce: no bits set
+        /// outside `IdLayout.used_mask`. Every constructor upholds this.
         raw_value: u64,
 
-        pub fn fromParts(
-            timestamp_value: u64,
-            node_value: u64,
-            sequence_value: u64,
-        ) errors.Error!Self {
-            if (timestamp_value > IdLayout.timestamp_mask) {
-                return errors.Error.FieldOutOfRange;
-            }
+        pub fn fromParts(parts: Parts) Self {
+            const result: Self = .{ .raw_value = IdLayout.pack(parts) };
 
-            if (node_value > IdLayout.node_mask) {
-                return errors.Error.FieldOutOfRange;
-            }
-
-            if (sequence_value > IdLayout.sequence_mask) {
-                return errors.Error.FieldOutOfRange;
-            }
-
-            const result = Self{
-                .raw_value = IdLayout.pack(
-                    timestamp_value,
-                    node_value,
-                    sequence_value,
-                ),
-            };
-            std.debug.assert(result.timestamp() == timestamp_value);
-            std.debug.assert(result.node() == node_value);
-            std.debug.assert(result.sequence() == sequence_value);
-
+            // Pairs with decode(): what goes in must come back out.
+            std.debug.assert(std.meta.eql(result.decode(), parts));
             return result;
         }
 
-        pub fn fromRaw(
-            raw_value: u64,
-        ) Self {
-            return .{
-                .raw_value = raw_value,
-            };
+        /// Accepts a raw value from outside (a database column, a wire
+        /// message). Rejects values with bits outside the layout
+        /// instead of silently ignoring them, which would let two
+        /// different raw values decode to the same fields.
+        pub fn fromRaw(raw_value: u64) errors.RawError!Self {
+            if (raw_value & ~IdLayout.used_mask != 0) {
+                return error.ReservedBitsSet;
+            }
+            return .{ .raw_value = raw_value };
         }
 
-        pub fn raw(
-            self: Self,
-        ) u64 {
+        pub fn raw(self: Self) u64 {
             return self.raw_value;
         }
 
-        pub fn decode(
-            self: Self,
-        ) Parts {
-            return IdLayout.unpack(
-                self.raw_value,
-            );
+        pub fn decode(self: Self) Parts {
+            return IdLayout.unpack(self.raw_value);
         }
 
-        pub fn timestamp(
-            self: Self,
-        ) u64 {
+        pub fn timestamp(self: Self) Timestamp {
             return self.decode().timestamp;
         }
 
-        pub fn node(
-            self: Self,
-        ) u64 {
+        pub fn node(self: Self) Node {
             return self.decode().node;
         }
 
-        pub fn sequence(
-            self: Self,
-        ) u64 {
+        pub fn sequence(self: Self) Sequence {
             return self.decode().sequence;
         }
 
-        pub fn eql(
-            self: Self,
-            other: Self,
-        ) bool {
+        /// Raw comparison is exact because every constructor keeps the
+        /// bits outside the layout at zero.
+        pub fn eql(self: Self, other: Self) bool {
             return self.raw_value == other.raw_value;
         }
 
@@ -108,25 +91,19 @@ pub fn OrderedId(
         /// agrees with comparing the ids themselves, so encoded ids
         /// stay chronologically sortable as text (in a URL, a log
         /// line, a database column, ...).
-        pub fn toString(
-            self: Self,
-        ) [encoding.encoded_len]u8 {
+        pub fn toString(self: Self) [encoding.encoded_len]u8 {
             return encoding.encode(self.raw_value);
         }
 
         /// Decodes a string produced by `toString` back into an id.
-        /// Rejects malformed input rather than silently misreading it;
-        /// see `encoding.DecodeError` for the specific failure modes.
-        pub fn parse(
-            s: []const u8,
-        ) encoding.DecodeError!Self {
-            return .{ .raw_value = try encoding.decode(s) };
+        /// Rejects malformed input rather than silently misreading it:
+        /// the string must be well-formed, and the value it encodes
+        /// must fit this layout.
+        pub fn parse(s: []const u8) errors.ParseError!Self {
+            return fromRaw(try encoding.decode(s));
         }
 
-        pub fn format(
-            self: Self,
-            writer: *std.Io.Writer,
-        ) !void {
+        pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             const parts = self.decode();
 
             try writer.print(
@@ -137,28 +114,23 @@ pub fn OrderedId(
     };
 }
 
-test "fromParts rejects out-of-range fields" {
-    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
+const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
 
-    try std.testing.expectError(
-        error.FieldOutOfRange,
-        TestId.fromParts(0, TestId.Layout.maxNode() + 1, 0),
-    );
+test "fromParts accepts every field at its maximum" {
+    const id = TestId.fromParts(.{
+        .timestamp = std.math.maxInt(TestId.Timestamp),
+        .node = std.math.maxInt(TestId.Node),
+        .sequence = std.math.maxInt(TestId.Sequence),
+    });
 
-    try std.testing.expectError(
-        error.FieldOutOfRange,
-        TestId.fromParts(0, 0, TestId.Layout.maxSequence() + 1),
-    );
-
-    _ = try TestId.fromParts(0, TestId.Layout.maxNode(), TestId.Layout.maxSequence());
+    try std.testing.expectEqual(std.math.maxInt(TestId.Node), id.node());
+    try std.testing.expectEqual(std.math.maxInt(TestId.Sequence), id.sequence());
 }
 
 test "eql compares by raw value" {
-    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
-
-    const a = try TestId.fromParts(100, 1, 1);
-    const b = try TestId.fromParts(100, 1, 1);
-    const c = try TestId.fromParts(100, 1, 2);
+    const a = TestId.fromParts(.{ .timestamp = 100, .node = 1, .sequence = 1 });
+    const b = TestId.fromParts(.{ .timestamp = 100, .node = 1, .sequence = 1 });
+    const c = TestId.fromParts(.{ .timestamp = 100, .node = 1, .sequence = 2 });
 
     try std.testing.expect(a.eql(b));
     try std.testing.expect(!a.eql(c));
@@ -179,45 +151,47 @@ test "identical bit widths still produce distinct types" {
         .tag = struct {},
     });
 
-    // NOTE: If this didn't compile, A and B would be the same type
-    // and this comparison itself wouldn't type-check as written.
+    // Type comparison happens at compile time: if the two `tag`
+    // structs didn't make A and B distinct, this test would fail.
     try std.testing.expect(A != B);
 }
 
 test "fromRaw round trips through decode" {
-    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
-
-    const original = try TestId.fromParts(999, 5, 3);
-    const reconstructed = TestId.fromRaw(original.raw());
+    const original = TestId.fromParts(.{ .timestamp = 999, .node = 5, .sequence = 3 });
+    const reconstructed = try TestId.fromRaw(original.raw());
 
     try std.testing.expect(original.eql(reconstructed));
-    try std.testing.expectEqual(@as(u64, 999), reconstructed.timestamp());
-    try std.testing.expectEqual(@as(u64, 5), reconstructed.node());
-    try std.testing.expectEqual(@as(u64, 3), reconstructed.sequence());
+    try std.testing.expectEqual(original.decode(), reconstructed.decode());
+}
+
+test "fromRaw rejects bits outside the layout" {
+    // 41 + 10 + 12 = 63 bits, so bit 63 is never used.
+    const valid = TestId.fromParts(.{ .timestamp = 5, .node = 1, .sequence = 1 });
+
+    try std.testing.expectError(
+        error.ReservedBitsSet,
+        TestId.fromRaw(valid.raw() | (1 << 63)),
+    );
 }
 
 test "format produces the expected string" {
-    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
+    const id = TestId.fromParts(.{ .timestamp = 1234, .node = 7, .sequence = 42 });
 
-    const id = try TestId.fromParts(1234, 7, 42);
+    var buf: [128]u8 = undefined;
+    const formatted = try std.fmt.bufPrint(&buf, "{f}", .{id});
 
-    const formatted = try std.fmt.allocPrint(std.testing.allocator, "{f}", .{id});
-    defer std.testing.allocator.free(formatted);
-
-    const expected = try std.fmt.allocPrint(
-        std.testing.allocator,
+    var expected_buf: [128]u8 = undefined;
+    const expected = try std.fmt.bufPrint(
+        &expected_buf,
         "OrderedId({d})[t=1234,n=7,s=42]",
         .{id.raw()},
     );
-    defer std.testing.allocator.free(expected);
 
     try std.testing.expectEqualStrings(expected, formatted);
 }
 
 test "toString/parse round trip preserves the id" {
-    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
-
-    const original = try TestId.fromParts(1234, 7, 42);
+    const original = TestId.fromParts(.{ .timestamp = 1234, .node = 7, .sequence = 42 });
     const s = original.toString();
     const reconstructed = try TestId.parse(&s);
 
@@ -225,10 +199,8 @@ test "toString/parse round trip preserves the id" {
 }
 
 test "toString output sorts the same way the ids do" {
-    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
-
-    const earlier = try TestId.fromParts(100, 0, 0);
-    const later = try TestId.fromParts(200, 0, 0);
+    const earlier = TestId.fromParts(.{ .timestamp = 100, .node = 0, .sequence = 0 });
+    const later = TestId.fromParts(.{ .timestamp = 200, .node = 0, .sequence = 0 });
 
     const earlier_s = earlier.toString();
     const later_s = later.toString();
@@ -237,8 +209,12 @@ test "toString output sorts the same way the ids do" {
 }
 
 test "parse rejects malformed strings" {
-    const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
-
     try std.testing.expectError(error.InvalidLength, TestId.parse("TOOSHORT"));
     try std.testing.expectError(error.InvalidCharacter, TestId.parse("I000000000000"));
+}
+
+test "parse rejects a well-formed string whose value doesn't fit the layout" {
+    // "8000000000000" encodes 1 << 63: valid Base32, but bit 63 is
+    // outside this 63-bit layout.
+    try std.testing.expectError(error.ReservedBitsSet, TestId.parse("8000000000000"));
 }

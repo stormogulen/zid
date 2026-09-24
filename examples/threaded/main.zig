@@ -22,10 +22,15 @@ const WorkerId = zid.OrderedId(.{
 const thread_count = 4;
 const ids_per_thread = 2_000;
 
-fn worker(io: std.Io, node: u64, out: []WorkerId) !void {
+// Each thread gets its own node id, so there must be enough of them.
+comptime {
+    std.debug.assert(thread_count <= std.math.maxInt(WorkerId.Node) + 1);
+}
+
+fn worker(io: std.Io, node: WorkerId.Node, out: []WorkerId) !void {
     var clock = zid.SystemClock.init(io);
 
-    var gen = try zid.Generator(WorkerId, zid.SystemClock).init(.{
+    var gen = zid.Generator(WorkerId, zid.SystemClock).init(.{
         .node = node,
         .clock = &clock,
     });
@@ -47,7 +52,9 @@ pub fn main(init: std.process.Init) !void {
     var threads: [thread_count]std.Thread = undefined;
 
     for (0..thread_count) |i| {
-        const node: u64 = i; // distinct node id per thread == the uniqueness guarantee
+        // Distinct node id per thread == the uniqueness guarantee. The
+        // cast can't fail: thread_count is checked against Node above.
+        const node: WorkerId.Node = @intCast(i);
         const slice = ids[i * ids_per_thread .. (i + 1) * ids_per_thread];
         threads[i] = try std.Thread.spawn(.{}, worker, .{ init.io, node, slice });
     }

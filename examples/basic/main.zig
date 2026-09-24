@@ -9,7 +9,7 @@ const app_epoch = zid.Epoch.fromUnixMillis(1_735_689_600_000); // 2025-01-01T00:
 pub fn main(init: std.process.Init) !void {
     var clock = zid.SystemClock.init(init.io);
 
-    var gen = try zid.Generator(UserId, zid.SystemClock).init(.{
+    var gen = zid.Generator(UserId, zid.SystemClock).init(.{
         .node = 7,
         .clock = &clock,
         .epoch = app_epoch,
@@ -26,7 +26,7 @@ pub fn main(init: std.process.Init) !void {
         .{
             first.raw(),
             first_parts.timestamp,
-            gen.unixMillis(first),
+            try gen.unixMillis(first),
             first_parts.node,
             first_parts.sequence,
         },
@@ -37,7 +37,7 @@ pub fn main(init: std.process.Init) !void {
         .{
             second.raw(),
             second_parts.timestamp,
-            gen.unixMillis(second),
+            try gen.unixMillis(second),
             second_parts.sequence,
         },
     );

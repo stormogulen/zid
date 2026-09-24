@@ -26,7 +26,7 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     var clock = zid.SystemClock.init(io);
 
-    var gen = try zid.Generator(LiveId, zid.SystemClock).init(.{
+    var gen = zid.Generator(LiveId, zid.SystemClock).init(.{
         .node = 1,
         .clock = &clock,
     });

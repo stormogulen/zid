@@ -11,7 +11,7 @@ const DeterministicId = zid.OrderedId(.{
 pub fn main() !void {
     var clock = zid.ManualClock{ .value = 1_000 };
 
-    var gen = try zid.Generator(DeterministicId, zid.ManualClock).init(.{
+    var gen = zid.Generator(DeterministicId, zid.ManualClock).init(.{
         .node = 1,
         .clock = &clock,
     });

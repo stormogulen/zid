@@ -15,9 +15,9 @@ const ExampleId = zid.OrderedId(.{
 pub fn main(init: std.process.Init) !void {
     _ = init;
 
-    const earlier = try ExampleId.fromParts(1000, 1, 0);
-    const middle = try ExampleId.fromParts(1000, 1, 1);
-    const later = try ExampleId.fromParts(1001, 1, 0);
+    const earlier = ExampleId.fromParts(.{ .timestamp = 1000, .node = 1, .sequence = 0 });
+    const middle = ExampleId.fromParts(.{ .timestamp = 1000, .node = 1, .sequence = 1 });
+    const later = ExampleId.fromParts(.{ .timestamp = 1001, .node = 1, .sequence = 0 });
 
     std.debug.print("earlier: {f}\n", .{earlier});
     std.debug.print("middle:  {f}\n", .{middle});
