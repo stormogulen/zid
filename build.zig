@@ -21,6 +21,11 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     test_step.dependOn(&run_tests.step);
 
+    // Format
+    const fmt_step = b.step("fmt", "Format Zig source files");
+    const fmt = b.addFmt(.{ .paths = &.{ "build.zig", "build.zig.zon", "src", "examples" } });
+    fmt_step.dependOn(&fmt.step);
+
     const ExampleDef = struct { name: []const u8, path: []const u8, step_name: []const u8, desc: []const u8 };
     const examples = [_]ExampleDef{
         .{ .name = "zid-example", .path = "examples/basic/main.zig", .step_name = "run", .desc = "Run zid example" },
@@ -41,15 +46,6 @@ pub fn build(b: *std.Build) void {
             .name = ex.name,
             .root_module = mod,
         });
-
-        // Format all Zig source files in the project.
-        // const fmt_step = b.step("fmt", "Format Zig source files");
-        // const fmt_cmd = b.addSystemCommand(&.{
-        //     "zig",
-        //     "fmt",
-        //     ".",
-        // });
-        // fmt_step.dependOn(&fmt_cmd.step);
 
         const run_cmd = b.addRunArtifact(exe);
 

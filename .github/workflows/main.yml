@@ -18,3 +18,7 @@ jobs:
       - run: zig build run
       - run: zig build run-type-safety
       - run: zig build run-testing
+      - run: zig build run-ordering
+      - run: zig build run-threaded
+      - run: zig build run-live-clock
+      - run: zig build test -Doptimize=ReleaseSafe
