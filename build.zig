@@ -34,6 +34,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zid-threaded", .path = "examples/threaded/main.zig", .step_name = "run-threaded", .desc = "Run zid multithreaded example" },
         .{ .name = "zid-ordering", .path = "examples/ordering/main.zig", .step_name = "run-ordering", .desc = "Id has stable ordering semantics" },
         .{ .name = "zid-live-clock", .path = "examples/live_clock/main.zig", .step_name = "run-live-clock", .desc = "Generator + SystemClock under a real io runtime" },
+        .{ .name = "zid-benchmark", .path = "examples/benchmark/main.zig", .step_name = "run-benchmark", .desc = "Benchmark generator cost and real-clock throughput" },
     };
     inline for (examples) |ex| {
         const mod = b.createModule(.{

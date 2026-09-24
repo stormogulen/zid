@@ -56,6 +56,7 @@ zig build test              # run the unit test suite
 zig build run                # basic Generator + decode walkthrough
 zig build run-type-safety    # compile-time type distinctness, eql correctness
 zig build run-testing        # deterministic testing with ManualClock
+zig build run-benchmark -Doptimize=ReleaseFast  # generator cost vs real-clock throughput
 ```
 
 ## Quick Start
