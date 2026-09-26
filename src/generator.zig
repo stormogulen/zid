@@ -126,8 +126,15 @@ pub fn Generator(
             });
 
             // The generator's core promise: for a fixed node, ids
-            // strictly increase.
-            if (self.last) |last| std.debug.assert(id.raw() > last.raw());
+            // strictly increase. A real check, not `std.debug.assert`: a
+            // failed assert is undefined behaviour in ReleaseFast, and zid
+            // doesn't choose the caller's build mode. A crash beats
+            // silently handing out a duplicate id. Costs one branch.
+            if (self.last) |last| {
+                if (id.raw() <= last.raw()) {
+                    @panic("zid: generator issued an id that is not greater than the last");
+                }
+            }
 
             self.last = id;
             return id;

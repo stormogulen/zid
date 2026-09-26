@@ -19,6 +19,11 @@ A small, zero-cost, compile-time verified ordered identity primitive.
 
 - **Single-threaded** — `Generator` is not safe to share across threads;
   no locking is used, which is part of how it stays zero-cost.
+- **Monotonicity is always checked** — the generator's "ids strictly
+  increase" guarantee is a real check (`@panic`), not a `std.debug.assert`,
+  so it holds in every build mode, ReleaseFast included. The other
+  assertions guard zid's own bit math and follow the usual build-mode
+  rules.
 - **Node id assignment is out of scope** — node ids are typed to the
   configured width (`UserId.Node` is a `u10` for 10 node bits), so an
   out-of-range node can't be passed in. Converting a runtime integer is
@@ -127,6 +132,15 @@ const to = UserId.maxAt(try UserId.timestampFromUnixMillis(end_ms));
 
 No generator is needed for this: the conversions live on the id type.
 
+### Building ids from integers
+
+`fromParts` takes typed fields, so an out-of-range literal is a compile
+error. For values that arrive at runtime, `fromInts` checks each one:
+
+```zig
+const id = try UserId.fromInts(timestamp, node, sequence); // zid.FieldError
+```
+
 ### Epochs
 
 The epoch is part of the id type, set in its config. A recent epoch
@@ -161,5 +175,18 @@ const from_url = try UserId.parse(text); // zid.DecodeError or error.ReservedBit
 
 Each fallible call returns only the errors it can actually produce
 (`zid.NextError`, `zid.TimestampError`, `zid.ResumeError`,
-`zid.RawError`, `zid.ParseError`), so callers can `switch` over them
-exhaustively.
+`zid.RawError`, `zid.ParseError`, `zid.FieldError`), so callers can
+`switch` over them exhaustively.
+
+### Making sure a config is checked
+
+Zig only analyses declarations that something uses. A config that is
+declared but never referenced -- or only referenced from a function nobody
+calls yet -- is never checked, so an invalid one compiles silently until
+the day it's first used. One line next to the declaration forces the
+check:
+
+```zig
+const UserId = zid.OrderedId(.{ ... });
+comptime { _ = UserId; } // an invalid config is a compile error from day one
+```

@@ -77,6 +77,22 @@ pub fn OrderedId(
             return result;
         }
 
+        /// Builds an id from runtime integers, checking each against its
+        /// field. Literals don't need this: `fromParts` already rejects an
+        /// out-of-range literal at compile time. Use it where the values
+        /// arrive at runtime (a config file, a test table, another format).
+        pub fn fromInts(
+            timestamp_value: u64,
+            node_value: u64,
+            sequence_value: u64,
+        ) errors.FieldError!Self {
+            return fromParts(.{
+                .timestamp = std.math.cast(Timestamp, timestamp_value) orelse return error.TimestampOutOfRange,
+                .node = std.math.cast(Node, node_value) orelse return error.NodeOutOfRange,
+                .sequence = std.math.cast(Sequence, sequence_value) orelse return error.SequenceOutOfRange,
+            });
+        }
+
         /// Accepts a raw value from outside (a database column, a wire
         /// message). Rejects values with bits outside the layout
         /// instead of silently ignoring them, which would let two
@@ -211,6 +227,24 @@ test "fromParts accepts every field at its maximum" {
 
     try std.testing.expectEqual(std.math.maxInt(TestId.Node), id.node());
     try std.testing.expectEqual(std.math.maxInt(TestId.Sequence), id.sequence());
+}
+
+test "fromInts builds the same id as fromParts" {
+    const expected = TestId.fromParts(.{ .timestamp = 1234, .node = 7, .sequence = 42 });
+    try std.testing.expect(expected.eql(try TestId.fromInts(1234, 7, 42)));
+
+    const max = TestId.fromParts(.{
+        .timestamp = std.math.maxInt(TestId.Timestamp),
+        .node = std.math.maxInt(TestId.Node),
+        .sequence = std.math.maxInt(TestId.Sequence),
+    });
+    try std.testing.expect(max.eql(try TestId.fromInts(max.timestamp(), max.node(), max.sequence())));
+}
+
+test "fromInts rejects each field one past its maximum" {
+    try std.testing.expectError(error.TimestampOutOfRange, TestId.fromInts(1 << 41, 0, 0));
+    try std.testing.expectError(error.NodeOutOfRange, TestId.fromInts(0, 1 << 10, 0));
+    try std.testing.expectError(error.SequenceOutOfRange, TestId.fromInts(0, 0, 1 << 12));
 }
 
 test "eql compares by raw value" {

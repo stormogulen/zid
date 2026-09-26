@@ -17,6 +17,7 @@ pub const SystemClock = clock.SystemClock;
 pub const MonotonicClock = clock.MonotonicClock;
 pub const ManualClock = clock.ManualClock;
 
+pub const FieldError = errors.FieldError;
 pub const TimestampError = errors.TimestampError;
 pub const NextError = errors.NextError;
 pub const ResumeError = errors.ResumeError;

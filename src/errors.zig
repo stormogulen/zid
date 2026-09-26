@@ -23,6 +23,13 @@ pub const NextError = TimestampError || error{
     SequenceExhausted,
 };
 
+/// `OrderedId.fromInts`: a runtime integer that doesn't fit its field.
+pub const FieldError = error{
+    TimestampOutOfRange,
+    NodeOutOfRange,
+    SequenceOutOfRange,
+};
+
 /// `Generator.initAfter`.
 pub const ResumeError = error{
     /// The id to resume after was issued for a different node.
