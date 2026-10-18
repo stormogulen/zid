@@ -13,6 +13,12 @@
 - `OrderedId.max_unix_millis`: the last Unix millisecond a type can
   represent.
 - `examples/shared_generator`, run with `zig build run-shared-generator`.
+- `OrderedId.writeString` and `OrderedId.string()`: print the encoded
+  id to a writer or through `{f}` without a temporary buffer.
+- Encoding tests: fixed known vectors, an every-byte-in-every-position
+  alphabet check, length checks, single-bit placement, and ordering
+  across character boundaries. Strict decoding (uppercase only) is now
+  covered by a test.
 - MIT `LICENSE`, this changelog, and a macOS/Windows CI matrix.
 
 ### Changed

@@ -278,6 +278,26 @@ Ids with different epochs are different types, so they can't be mixed
 by accident. An epoch so late that the largest timestamp would overflow
 u64 Unix milliseconds is a compile error.
 
+### Printing ids
+
+`toString()` returns the 13-character encoded id as a `[13]u8`. To print
+it without an intermediate buffer, use `string()` with `{f}`, or
+`writeString` on any `std.Io.Writer`:
+
+```zig
+std.log.info("created {f}", .{id.string()}); // created 0DKQ1Z3T5W7A9
+try id.writeString(writer);
+```
+
+Plain `{f}` on the id itself prints the debug form with the decoded
+fields, `OrderedId(<raw>)[t=..,n=..,s=..]`, which is better for logs you
+read than for strings you parse.
+
+Decoding is strict on purpose: `parse` accepts only the 32 uppercase
+alphabet characters, exactly 13 of them. Lowercase letters and
+look-alikes such as `O` or `l` are rejected rather than guessed at, so
+every id has exactly one valid spelling.
+
 ### Boundaries
 
 Ids coming from outside (a database column, a URL) go through a

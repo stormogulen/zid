@@ -210,6 +210,20 @@ pub fn OrderedId(
             return fromRaw(try encoding.decode(s));
         }
 
+        /// Writes the same string as `toString` straight to a writer, with
+        /// no intermediate buffer. Usable with `std.fmt.alt`:
+        /// `print("{f}", .{std.fmt.alt(id, .writeString)})`.
+        pub fn writeString(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+            try writer.writeAll(&self.toString());
+        }
+
+        /// Wraps the id so `{f}` prints its encoded string instead of the
+        /// debug form that `{f}` gives the id itself:
+        /// `std.log.info("created {f}", .{id.string()})`.
+        pub fn string(self: Self) std.fmt.Alt(Self, writeString) {
+            return .{ .data = self };
+        }
+
         pub fn format(self: Self, writer: *std.Io.Writer) std.Io.Writer.Error!void {
             const parts = self.decode();
 
@@ -424,4 +438,38 @@ test "max_unix_millis is the end of the id type's lifetime" {
     });
     try std.testing.expectEqual(1_735_689_600_000 + (1 << 41) - 1, shifted.max_unix_millis);
     try std.testing.expectEqual(error.TimestampOverflow, shifted.timestampFromUnixMillis(shifted.max_unix_millis + 1));
+}
+
+test "writeString and string() print exactly what toString returns" {
+    const id = TestId.fromParts(.{ .timestamp = 123_456_789, .node = 5, .sequence = 9 });
+    const expected = id.toString();
+
+    var buf: [64]u8 = undefined;
+
+    var writer: std.Io.Writer = .fixed(&buf);
+    try id.writeString(&writer);
+    try std.testing.expectEqualStrings(&expected, writer.buffered());
+
+    const via_fmt = try std.fmt.bufPrint(&buf, "{f}", .{id.string()});
+    try std.testing.expectEqualStrings(&expected, via_fmt);
+
+    const via_alt = try std.fmt.bufPrint(&buf, "id={f}!", .{std.fmt.alt(id, .writeString)});
+    try std.testing.expectEqualStrings("id=" ++ expected ++ "!", via_alt);
+}
+
+test "a printed id parses back to the same id" {
+    const id = TestId.fromParts(.{ .timestamp = 42, .node = 1023, .sequence = 4095 });
+
+    var buf: [encoding.encoded_len]u8 = undefined;
+    const printed = try std.fmt.bufPrint(&buf, "{f}", .{id.string()});
+
+    try std.testing.expect(id.eql(try TestId.parse(printed)));
+}
+
+test "writeString reports a writer that is too small" {
+    const id = TestId.fromParts(.{ .timestamp = 1, .node = 1, .sequence = 1 });
+
+    var small: [encoding.encoded_len - 1]u8 = undefined;
+    var writer: std.Io.Writer = .fixed(&small);
+    try std.testing.expectError(error.WriteFailed, id.writeString(&writer));
 }

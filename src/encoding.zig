@@ -28,7 +28,7 @@ const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 const invalid_value: u8 = 0xFF;
 
-/// alphabet character -> 5-bit value, or `invalid` for any byte that
+/// alphabet character -> 5-bit value, or `invalid_value` for any byte that
 /// isn't in the alphabet. Built at compile time: no runtime init,
 /// no shared mutable state, safe to call from any number of threads.
 const decode_table: [256]u8 = blk: {
@@ -160,4 +160,90 @@ test "decode rejects a leading character that doesn't fit in 4 bits" {
 
     // 'F' is alphabet index 15 (0xF), which fits exactly.
     _ = try decode("F000000000000");
+}
+
+test "known vectors" {
+    // Fixed expected strings, so a change to the alphabet, the width or
+    // the bit order can't pass by round-tripping against itself.
+    try std.testing.expectEqualStrings("0000000000000", &encode(0));
+    try std.testing.expectEqualStrings("0000000000001", &encode(1));
+    try std.testing.expectEqualStrings("000000000000Z", &encode(31));
+    try std.testing.expectEqualStrings("0000000000010", &encode(32));
+    try std.testing.expectEqualStrings("0000000000100", &encode(1024));
+    try std.testing.expectEqualStrings("1000000000000", &encode(1 << 60));
+    try std.testing.expectEqualStrings("7ZZZZZZZZZZZZ", &encode(std.math.maxInt(i64)));
+    try std.testing.expectEqualStrings("8000000000000", &encode(1 << 63));
+    try std.testing.expectEqualStrings("FZZZZZZZZZZZZ", &encode(std.math.maxInt(u64)));
+}
+
+test "decode accepts exactly the alphabet, in every position" {
+    // Every byte value, in every position: accepted if and only if it is
+    // an alphabet character (and, in the leading position, fits in 4
+    // bits). Lowercase letters and Crockford's I/L/O aliases are not in
+    // the alphabet, so they are rejected too: decoding is strict.
+    for (0..256) |byte| {
+        const c: u8 = @intCast(byte);
+        const index = std.mem.indexOfScalar(u8, alphabet, c);
+
+        for (0..encoded_len) |position| {
+            var text: [encoded_len]u8 = @splat('0');
+            text[position] = c;
+
+            if (index == null) {
+                try std.testing.expectError(error.InvalidCharacter, decode(&text));
+            } else if (position == 0 and index.? > 0xF) {
+                try std.testing.expectError(error.ValueTooLarge, decode(&text));
+            } else {
+                _ = try decode(&text);
+            }
+        }
+    }
+}
+
+test "decoding is strict about case and look-alike characters" {
+    try std.testing.expectError(error.InvalidCharacter, decode("000000000000a"));
+    try std.testing.expectError(error.InvalidCharacter, decode("000000000000O"));
+    try std.testing.expectError(error.InvalidCharacter, decode("000000000000l"));
+    try std.testing.expectError(error.InvalidCharacter, decode("00000000000-0"));
+    try std.testing.expectError(error.InvalidCharacter, decode("00000000000 0"));
+}
+
+test "every length but encoded_len is rejected" {
+    const text = "0" ** (encoded_len + 3);
+    for (0..text.len + 1) |len| {
+        if (len == encoded_len) continue;
+        try std.testing.expectError(error.InvalidLength, decode(text[0..len]));
+    }
+}
+
+test "each bit of a u64 lands in its own place and round trips" {
+    for (0..64) |bit| {
+        const value = @as(u64, 1) << @intCast(bit);
+        const text = encode(value);
+
+        try std.testing.expectEqual(value, try decode(&text));
+
+        // A single set bit lands in exactly one character and never
+        // spreads into its neighbours.
+        var nonzero: usize = 0;
+        for (text) |c| {
+            if (c != '0') nonzero += 1;
+        }
+        try std.testing.expectEqual(1, nonzero);
+    }
+}
+
+test "ordering holds across character boundaries" {
+    // Values just below and above each 5-bit boundary, plus the 4-bit
+    // leading character's boundary.
+    var previous = encode(0);
+    var boundary: u6 = 5;
+    while (boundary < 60) : (boundary += 5) {
+        const base = @as(u64, 1) << boundary;
+        for ([_]u64{ base - 1, base, base + 1 }) |value| {
+            const current = encode(value);
+            try std.testing.expect(std.mem.order(u8, &previous, &current) != .gt);
+            previous = current;
+        }
+    }
 }
