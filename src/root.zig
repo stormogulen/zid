@@ -2,6 +2,8 @@
 
 const layout = @import("ordered/layout.zig");
 const generator = @import("generator.zig");
+const atomic_generator = @import("atomic_generator.zig");
+const wait = @import("wait.zig");
 const clock = @import("clock.zig");
 const errors = @import("errors.zig");
 const epoch = @import("epoch.zig");
@@ -11,6 +13,8 @@ pub const OrderedId = @import("ordered/id.zig").OrderedId;
 pub const Config = layout.Config;
 
 pub const Generator = generator.Generator;
+pub const AtomicGenerator = atomic_generator.AtomicGenerator;
+pub const SpinWait = wait.SpinWait;
 pub const Epoch = epoch.Epoch;
 
 pub const SystemClock = clock.SystemClock;
@@ -29,6 +33,8 @@ test {
     _ = @import("ordered/layout.zig");
     _ = @import("ordered/id.zig");
     _ = @import("generator.zig");
+    _ = @import("atomic_generator.zig");
+    _ = @import("wait.zig");
     _ = @import("clock.zig");
     _ = @import("epoch.zig");
     _ = @import("encoding.zig");

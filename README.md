@@ -7,6 +7,20 @@ A small, zero-cost, compile-time verified ordered identity primitive.
 [![Zig](https://img.shields.io/badge/zig-0.16.0-orange)](https://ziglang.org/)
 
 
+## Install
+
+```sh
+zig fetch --save git+https://github.com/stormogulen/zid
+```
+
+```zig
+// build.zig
+const zid = b.dependency("zid", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("zid", zid.module("zid"));
+```
+
+Requires Zig 0.16.0 or newer.
+
 ## Features
 
 - **Type-level configuration** — Bit layout defined at type creation
@@ -17,8 +31,11 @@ A small, zero-cost, compile-time verified ordered identity primitive.
 
 ## Design Constraints
 
-- **Single-threaded** — `Generator` is not safe to share across threads;
-  no locking is used, which is part of how it stays zero-cost.
+- **`Generator` is single-threaded** — it is not safe to share across
+  threads; no locking is used, which is part of how it stays zero-cost.
+  Give each thread its own `Generator` and node id (see
+  `examples/threaded`), or share one node with `AtomicGenerator` (see
+  [Sharing a generator across threads](#sharing-a-generator-across-threads)).
 - **Monotonicity is always checked** — the generator's "ids strictly
   increase" guarantee is a real check (`@panic`), not a `std.debug.assert`,
   so it holds in every build mode, ReleaseFast included. The other
@@ -61,6 +78,8 @@ zig build test              # unit, property and fuzz-corpus tests
 zig build run                # basic Generator + decode walkthrough
 zig build run-type-safety    # compile-time type distinctness, eql correctness
 zig build run-testing        # deterministic testing with ManualClock
+zig build run-threaded       # one Generator and node id per thread
+zig build run-shared-generator  # several threads sharing one AtomicGenerator
 zig build run-benchmark -Doptimize=ReleaseFast  # generator cost vs real-clock throughput
 ```
 
@@ -111,6 +130,103 @@ var gen = try zid.Generator(UserId, zid.MonotonicClock).initAfter(.{
 Every new id is greater than `last_issued_id`. If the clock is behind
 it, `next()` reports `error.ClockMovedBackwards` rather than issuing a
 duplicate.
+
+### Bit layout
+
+`OrderedId` packs three fields into one `u64`, most significant first.
+With the 41/10/12 layout from the Quick Start:
+
+```
+ 63  62                      22 21        12 11            0
++---+--------------------------+------------+---------------+
+| 0 |   timestamp (41 bits)    | node (10)  | sequence (12) |
++---+--------------------------+------------+---------------+
+```
+
+- **timestamp** counts milliseconds since the id type's epoch.
+- **node** says which generator issued the id.
+- **sequence** counts ids issued in the same millisecond (4096 per
+  millisecond per node here).
+
+Ids compare as plain integers, so sorting by `raw()` sorts by time,
+then node, then sequence. Any bits above the three fields are always
+zero.
+
+### Lifetime
+
+A layout with `timestamp_bits` bits runs out after `2^timestamp_bits`
+milliseconds from its epoch (41 bits is about 69.7 years). After that,
+`next()` returns `error.TimestampOverflow`. `max_unix_millis` says
+exactly when:
+
+```zig
+const expires_at_ms = UserId.max_unix_millis; // last representable Unix ms
+```
+
+With the default Unix epoch and 41 bits that is 2039-09-07, so pick a
+recent `.epoch` for new systems.
+
+### Waiting out sequence exhaustion
+
+When all sequence values for the current millisecond are used,
+`next()` returns `error.SequenceExhausted` and leaves the choice to the
+caller. `nextRetrying` is the common choice: it calls your waiter and
+tries again until the clock moves on.
+
+```zig
+const id = try gen.nextRetrying(zid.SpinWait{});
+```
+
+A waiter is anything with a `wait(self)` method, so a program with an
+event loop can sleep instead of spinning. Every error other than
+`SequenceExhausted` is returned as is.
+
+### Tolerating small clock steps
+
+With `SystemClock`, an NTP correction can move time back a few
+milliseconds. By default that makes `next()` return
+`error.ClockMovedBackwards`. To absorb steps up to a limit instead:
+
+```zig
+var gen = zid.Generator(UserId, zid.SystemClock).init(.{
+    .clock = &clock,
+    .node = 1,
+    .clock_skew_tolerance_ms = 5,
+});
+```
+
+Within the tolerance the generator keeps issuing ids at the last
+timestamp, so ids stay strictly increasing but run slightly ahead of
+the wall clock, and the sequence can run out sooner. A step larger than
+the tolerance is still an error. `MonotonicClock` never steps back, so
+it doesn't need this.
+
+### Sharing a generator across threads
+
+`AtomicGenerator` has the same API as `Generator`, but `next()` can be
+called from any thread on one shared generator:
+
+```zig
+var gen = zid.AtomicGenerator(UserId, zid.MonotonicClock).init(.{
+    .clock = &clock,
+    .node = 1,
+});
+// from any thread:
+const id = try gen.nextRetrying(zid.SpinWait{});
+```
+
+Its whole state is the last id, advanced with a compare-and-swap, so
+there is no lock. Things to know:
+
+- It is slower than `Generator` even without contention, because of the
+  atomic operation. Run `zig build run-benchmark -Doptimize=ReleaseFast`
+  to measure it on your machine. If each thread can have its own node
+  id, a `Generator` per thread is faster.
+- The clock's `now` is called from several threads at once, so it must
+  be safe for that. `MonotonicClock` and `SystemClock` are; `ManualClock`
+  is not.
+- It needs a layout with at least one unused bit (the layout must use
+  fewer than 64 bits). A full 64-bit layout is a compile error.
 
 ### Ordering and range queries
 
@@ -190,3 +306,7 @@ check:
 const UserId = zid.OrderedId(.{ ... });
 comptime { _ = UserId; } // an invalid config is a compile error from day one
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). Changes are listed in [CHANGELOG.md](CHANGELOG.md).

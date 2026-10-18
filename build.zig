@@ -32,6 +32,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zid-type-safety", .path = "examples/type_safety/main.zig", .step_name = "run-type-safety", .desc = "Run zid type-safety example" },
         .{ .name = "zid-testing", .path = "examples/testing/main.zig", .step_name = "run-testing", .desc = "Run zid testing example" },
         .{ .name = "zid-threaded", .path = "examples/threaded/main.zig", .step_name = "run-threaded", .desc = "Run zid multithreaded example" },
+        .{ .name = "zid-shared-generator", .path = "examples/shared_generator/main.zig", .step_name = "run-shared-generator", .desc = "Several threads sharing one AtomicGenerator" },
         .{ .name = "zid-ordering", .path = "examples/ordering/main.zig", .step_name = "run-ordering", .desc = "Id has stable ordering semantics" },
         .{ .name = "zid-live-clock", .path = "examples/live_clock/main.zig", .step_name = "run-live-clock", .desc = "Generator + SystemClock under a real io runtime" },
         .{ .name = "zid-benchmark", .path = "examples/benchmark/main.zig", .step_name = "run-benchmark", .desc = "Benchmark generator cost and real-clock throughput" },

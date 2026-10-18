@@ -61,6 +61,11 @@ pub fn OrderedId(
         /// What this id type's timestamps count from.
         pub const epoch: Epoch = config.epoch;
 
+        /// The last Unix millisecond this id type can represent. After
+        /// it, `Generator.next` returns `error.TimestampOverflow`. Check
+        /// it when choosing a layout and epoch.
+        pub const max_unix_millis: u64 = config.epoch.unix_millis + std.math.maxInt(IdLayout.Timestamp);
+
         // "Zero-cost": an id is exactly one u64 in memory, so arrays of
         // ids, hash map keys and struct fields cost no more than the
         // raw integer would.
@@ -404,4 +409,19 @@ test "a time range becomes an id range" {
 
     const inside = AppId.fromParts(.{ .timestamp = 150, .node = 7, .sequence = 3 });
     try std.testing.expect(from.order(inside) == .lt and inside.order(to) == .lt);
+}
+
+test "max_unix_millis is the end of the id type's lifetime" {
+    // 2^41 - 1 ms after 1970-01-01, roughly 2039-09-07.
+    try std.testing.expectEqual((1 << 41) - 1, TestId.max_unix_millis);
+
+    const shifted = OrderedId(.{
+        .timestamp_bits = 41,
+        .node_bits = 10,
+        .sequence_bits = 12,
+        .tag = struct {},
+        .epoch = Epoch.fromUnixSeconds(1_735_689_600),
+    });
+    try std.testing.expectEqual(1_735_689_600_000 + (1 << 41) - 1, shifted.max_unix_millis);
+    try std.testing.expectEqual(error.TimestampOverflow, shifted.timestampFromUnixMillis(shifted.max_unix_millis + 1));
 }

@@ -66,6 +66,42 @@ fn benchGeneratorCost(io: std.Io) !Result {
     };
 }
 
+/// Same as benchGeneratorCost, through AtomicGenerator: the price of the
+/// compare-and-swap when no other thread is competing for it. (A shared
+/// ManualClock is fine here because only one thread runs.)
+fn benchAtomicCost(io: std.Io) !Result {
+    var clock = zid.ManualClock{ .value = 1_000 };
+    var gen = zid.AtomicGenerator(BenchId, zid.ManualClock).init(.{
+        .node = 1,
+        .clock = &clock,
+    });
+
+    var exhausted_retries: u64 = 0;
+    const start = std.Io.Timestamp.now(io, .awake);
+
+    var generated: u64 = 0;
+    while (generated < iterations) {
+        const id = gen.next() catch |err| switch (err) {
+            error.SequenceExhausted => {
+                clock.advance(1);
+                exhausted_retries += 1;
+                continue;
+            },
+            error.BeforeEpoch,
+            error.TimestampOverflow,
+            error.ClockMovedBackwards,
+            => return err,
+        };
+        std.mem.doNotOptimizeAway(id);
+        generated += 1;
+    }
+
+    return .{
+        .elapsed_ns = elapsedNs(start, io),
+        .exhausted_retries = exhausted_retries,
+    };
+}
+
 fn benchRealThroughput(io: std.Io) !Result {
     var clock = zid.MonotonicClock.init(io);
     var gen = zid.Generator(BenchId, zid.MonotonicClock).init(.{
@@ -132,6 +168,9 @@ pub fn main(init: std.process.Init) !void {
     try writer.flush();
 
     try report(writer, "Generator cost (ManualClock)", try benchGeneratorCost(io));
+    try writer.flush();
+
+    try report(writer, "AtomicGenerator cost (ManualClock, uncontended)", try benchAtomicCost(io));
     try writer.flush();
 
     try report(writer, "Real throughput (MonotonicClock)", try benchRealThroughput(io));

@@ -44,8 +44,6 @@ pub fn Generator(
         }
     }
 
-    const Sequence = IdType.Sequence;
-
     return struct {
         const Self = @This();
 
@@ -61,6 +59,9 @@ pub fn Generator(
 
         clock: *ClockType,
         node: Node,
+        /// How far behind the last id the clock may read before `next()`
+        /// gives up. See `Options.clock_skew_tolerance_ms`.
+        skew_tolerance_ms: u64,
         /// The most recently returned id, or null before the first
         /// call to next(). Its timestamp and sequence are all the
         /// state the generator needs.
@@ -77,12 +78,21 @@ pub fn Generator(
             /// than a copy) is what lets a test move a ManualClock from
             /// outside.
             clock: *ClockType,
+            /// How many milliseconds the clock may read behind the last
+            /// id before `next()` returns `error.ClockMovedBackwards`.
+            /// Within the tolerance the generator keeps issuing ids at
+            /// the last id's timestamp (so they run slightly ahead of
+            /// the wall clock, and may exhaust the sequence sooner)
+            /// instead of failing. Ids still strictly increase. The
+            /// default, 0, reports any backwards step.
+            clock_skew_tolerance_ms: u64 = 0,
         };
 
         pub fn init(options: Options) Self {
             return .{
                 .clock = options.clock,
                 .node = options.node,
+                .skew_tolerance_ms = options.clock_skew_tolerance_ms,
             };
         }
 
@@ -103,27 +113,7 @@ pub fn Generator(
 
         pub fn next(self: *Self) NextError!IdType {
             const timestamp = try IdType.timestampFromUnixMillis(self.clock.now());
-
-            const sequence: Sequence = if (self.last) |last| sequence: {
-                const last_timestamp = last.timestamp();
-
-                if (timestamp < last_timestamp) {
-                    return error.ClockMovedBackwards;
-                }
-                if (timestamp > last_timestamp) {
-                    break :sequence 0;
-                }
-                if (last.sequence() == std.math.maxInt(Sequence)) {
-                    return error.SequenceExhausted;
-                }
-                break :sequence last.sequence() + 1;
-            } else 0;
-
-            const id = IdType.fromParts(.{
-                .timestamp = timestamp,
-                .node = self.node,
-                .sequence = sequence,
-            });
+            const id = try successor(IdType, self.last, timestamp, self.node, self.skew_tolerance_ms);
 
             // The generator's core promise: for a fixed node, ids
             // strictly increase. A real check, not `std.debug.assert`: a
@@ -139,7 +129,64 @@ pub fn Generator(
             self.last = id;
             return id;
         }
+
+        /// Like `next`, but when the millisecond's sequence is used up it
+        /// calls `waiter.wait()` and tries again, until the clock moves
+        /// on. Every other error is returned as is. `waiter` is any value
+        /// with a `wait(self)` method: `zid.SpinWait{}` busy-waits, and a
+        /// program with an event loop can sleep instead. If the clock never
+        /// advances, this never returns, so don't pair it with a
+        /// `ManualClock` that the waiter doesn't move.
+        pub fn nextRetrying(self: *Self, waiter: anytype) NextError!IdType {
+            while (true) {
+                return self.next() catch |err| switch (err) {
+                    error.SequenceExhausted => {
+                        waiter.wait();
+                        continue;
+                    },
+                    else => |e| return e,
+                };
+            }
+        }
     };
+}
+
+/// The id that follows `last` when the clock reads `timestamp`. Pure: it
+/// reads no clock and keeps no state, so `Generator` and
+/// `AtomicGenerator` share one definition of the sequencing rules.
+pub fn successor(
+    comptime IdType: type,
+    last: ?IdType,
+    timestamp_now: IdType.Timestamp,
+    node: IdType.Node,
+    skew_tolerance_ms: u64,
+) errors.NextError!IdType {
+    var timestamp = timestamp_now;
+
+    const sequence: IdType.Sequence = if (last) |l| sequence: {
+        const last_timestamp = l.timestamp();
+
+        if (timestamp < last_timestamp) {
+            if (last_timestamp - timestamp > skew_tolerance_ms) {
+                return error.ClockMovedBackwards;
+            }
+            // Small step back: keep issuing at the last timestamp.
+            timestamp = last_timestamp;
+        }
+        if (timestamp > last_timestamp) {
+            break :sequence 0;
+        }
+        if (l.sequence() == std.math.maxInt(IdType.Sequence)) {
+            return error.SequenceExhausted;
+        }
+        break :sequence l.sequence() + 1;
+    } else 0;
+
+    return IdType.fromParts(.{
+        .timestamp = timestamp,
+        .node = node,
+        .sequence = sequence,
+    });
 }
 
 fn isContainer(comptime T: type) bool {
@@ -346,4 +393,80 @@ test "initAfter rejects an id from another node" {
             .clock = &manual,
         }, last),
     );
+}
+
+test "small clock steps back are absorbed within the tolerance" {
+    var manual = clock.ManualClock{ .value = 1000 };
+    var gen = Generator(TestId, clock.ManualClock).init(.{
+        .node = 1,
+        .clock = &manual,
+        .clock_skew_tolerance_ms = 5,
+    });
+
+    const first = try gen.next();
+    manual.set(997); // 3 ms back: inside the tolerance.
+    const second = try gen.next();
+
+    try std.testing.expectEqual(first.timestamp(), second.timestamp());
+    try std.testing.expect(second.raw() > first.raw());
+
+    manual.set(990); // 10 ms behind the last id: outside it.
+    try std.testing.expectError(error.ClockMovedBackwards, gen.next());
+
+    manual.set(1001); // The clock has caught up.
+    const third = try gen.next();
+    try std.testing.expectEqual(1001, third.timestamp());
+    try std.testing.expectEqual(0, third.sequence());
+}
+
+test "a zero tolerance reports every step back" {
+    var manual = clock.ManualClock{ .value = 1000 };
+    var gen = Generator(TestId, clock.ManualClock).init(.{ .node = 1, .clock = &manual });
+
+    _ = try gen.next();
+    manual.set(999);
+    try std.testing.expectError(error.ClockMovedBackwards, gen.next());
+}
+
+const AdvancingWaiter = struct {
+    clock: *clock.ManualClock,
+    waits: usize = 0,
+
+    pub fn wait(self: *AdvancingWaiter) void {
+        self.waits += 1;
+        self.clock.advance(1);
+    }
+};
+
+test "nextRetrying waits out sequence exhaustion" {
+    const TinyId = OrderedId(.{
+        .timestamp_bits = 41,
+        .node_bits = 10,
+        .sequence_bits = 1,
+        .tag = struct {},
+    });
+
+    var manual = clock.ManualClock{ .value = 1000 };
+    var gen = Generator(TinyId, clock.ManualClock).init(.{ .node = 1, .clock = &manual });
+    var waiter = AdvancingWaiter{ .clock = &manual };
+
+    var previous = try gen.nextRetrying(&waiter);
+    for (0..10) |_| {
+        const id = try gen.nextRetrying(&waiter);
+        try std.testing.expect(id.raw() > previous.raw());
+        previous = id;
+    }
+    // Two ids fit in a millisecond, so 11 ids need 5 waits.
+    try std.testing.expectEqual(5, waiter.waits);
+}
+
+test "nextRetrying passes other errors through" {
+    var manual = clock.ManualClock{ .value = 1000 };
+    var gen = Generator(TestId, clock.ManualClock).init(.{ .node = 1, .clock = &manual });
+    var waiter = AdvancingWaiter{ .clock = &manual };
+
+    _ = try gen.nextRetrying(&waiter);
+    manual.set(1);
+    try std.testing.expectError(error.ClockMovedBackwards, gen.nextRetrying(&waiter));
+    try std.testing.expectEqual(0, waiter.waits);
 }
