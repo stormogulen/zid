@@ -237,12 +237,13 @@ test "ordering holds across character boundaries" {
     // Values just below and above each 5-bit boundary, plus the 4-bit
     // leading character's boundary.
     var previous = encode(0);
-    var boundary: u6 = 5;
-    while (boundary < 60) : (boundary += 5) {
-        const base = @as(u64, 1) << boundary;
+    var boundary: u7 = 5;
+    while (boundary <= 60) : (boundary += 5) {
+        const base = @as(u64, 1) << @intCast(boundary);
         for ([_]u64{ base - 1, base, base + 1 }) |value| {
             const current = encode(value);
-            try std.testing.expect(std.mem.order(u8, &previous, &current) != .gt);
+            // Every value here is distinct and larger than the one before.
+            try std.testing.expectEqual(.lt, std.mem.order(u8, &previous, &current));
             previous = current;
         }
     }

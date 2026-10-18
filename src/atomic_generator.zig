@@ -30,13 +30,7 @@ pub fn AtomicGenerator(
     comptime ClockType: type,
 ) type {
     comptime {
-        if (!@hasDecl(IdType, "Layout") or !@hasDecl(IdType, "fromParts") or !@hasDecl(IdType, "timestampFromUnixMillis")) {
-            @compileError("AtomicGenerator's IdType must be a zid.OrderedId type, found " ++ @typeName(IdType));
-        }
-        if (!@hasDecl(ClockType, "now")) {
-            @compileError("AtomicGenerator's ClockType must provide `pub fn now(self: *" ++
-                @typeName(ClockType) ++ ") u64`");
-        }
+        generator.checkTypes("AtomicGenerator", IdType, ClockType);
         if (IdType.Layout.total_bits == 64) {
             @compileError("AtomicGenerator needs a layout with at least one unused bit; use Generator for a 64-bit layout");
         }
@@ -49,6 +43,7 @@ pub fn AtomicGenerator(
     return struct {
         const Self = @This();
 
+        pub const Id = IdType;
         pub const Node = IdType.Node;
         pub const NextError = errors.NextError;
 
@@ -91,6 +86,14 @@ pub fn AtomicGenerator(
             return self;
         }
 
+        /// Continues after a whole millisecond. Same contract as
+        /// `Generator.initAfterTimestamp`.
+        pub fn initAfterTimestamp(options: Options, reserved: IdType.Timestamp) Self {
+            var self = init(options);
+            self.state = .init(generator.lastIdAt(IdType, reserved, options.node).raw());
+            return self;
+        }
+
         /// The most recently issued id, or null before the first one. Under
         /// concurrent `next()` calls it is a snapshot: another thread may
         /// have issued a later id by the time you use the result.
@@ -112,6 +115,8 @@ pub fn AtomicGenerator(
                 const timestamp = try IdType.timestampFromUnixMillis(self.clock.now());
 
                 const last: ?IdType = if (observed == none) null else @enumFromInt(observed);
+                // `successor` panics rather than return an id at or below
+                // `last`, so the compare-and-swap only ever moves forward.
                 const id = try generator.successor(IdType, last, timestamp, self.node, self.skew_tolerance_ms);
 
                 // On failure another thread issued an id first; the
@@ -123,15 +128,7 @@ pub fn AtomicGenerator(
         /// Like `next`, but waits out sequence exhaustion. See
         /// `Generator.nextRetrying`.
         pub fn nextRetrying(self: *Self, waiter: anytype) NextError!IdType {
-            while (true) {
-                return self.next() catch |err| switch (err) {
-                    error.SequenceExhausted => {
-                        waiter.wait();
-                        continue;
-                    },
-                    else => |e| return e,
-                };
-            }
+            return generator.retryingNext(Self, self, waiter);
         }
     };
 }
@@ -205,6 +202,26 @@ test "initAfter resumes and rejects another node" {
         error.NodeMismatch,
         AtomicGenerator(TestId, clock.ManualClock).initAfter(.{ .node = 5, .clock = &manual }, last),
     );
+}
+
+test "initAfterTimestamp matches Generator.initAfterTimestamp" {
+    var manual_a = clock.ManualClock{ .value = 999 };
+    var manual_b = clock.ManualClock{ .value = 999 };
+    var plain = generator.Generator(TestId, clock.ManualClock).initAfterTimestamp(.{ .node = 6, .clock = &manual_a }, 1000);
+    var atomic = AtomicGenerator(TestId, clock.ManualClock).initAfterTimestamp(.{ .node = 6, .clock = &manual_b }, 1000);
+
+    try std.testing.expectEqual(plain.lastIssued(), atomic.lastIssued());
+    for ([_]u64{ 999, 1000, 1001, 1001 }) |now| {
+        manual_a.set(now);
+        manual_b.set(now);
+        const expected = plain.next();
+        if (expected) |id| {
+            try std.testing.expectEqual(id, try atomic.next());
+        } else |err| {
+            try std.testing.expectError(err, atomic.next());
+        }
+    }
+    try std.testing.expectEqual(1, atomic.lastIssued().?.sequence());
 }
 
 test "threads sharing one generator never collide" {

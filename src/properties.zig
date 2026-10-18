@@ -98,31 +98,36 @@ test "property: minAt and maxAt bound every id at their timestamp" {
     }
 }
 
-test "property: a generator's ids strictly increase under a random clock" {
-    // Small sequence field, so exhaustion happens often.
-    const Id = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 3, .tag = struct {} });
+/// Small sequence field, so exhaustion happens often.
+const SmallSeqId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 3, .tag = struct {} });
 
+/// Moves a manual clock the way the random-clock tests want: mostly
+/// stay in the same millisecond, sometimes move forward, occasionally
+/// step backwards.
+fn randomStep(manual: *clock.ManualClock, random: std.Random) void {
+    switch (random.uintLessThan(u8, 10)) {
+        0...5 => {},
+        6...8 => manual.advance(random.intRangeAtMost(u64, 1, 5)),
+        else => manual.set(manual.value -| random.intRangeAtMost(u64, 1, 3)),
+    }
+}
+
+test "property: a generator's ids strictly increase under a random clock" {
     var prng: std.Random.DefaultPrng = .init(0xc10c);
     const random = prng.random();
 
     var manual = clock.ManualClock{ .value = 1_000 };
-    var gen = generator.Generator(Id, clock.ManualClock).init(.{
+    var gen = generator.Generator(SmallSeqId, clock.ManualClock).init(.{
         .node = 5,
         .clock = &manual,
     });
 
-    var previous: ?Id = null;
+    var previous: ?SmallSeqId = null;
     var exhausted: usize = 0;
     var backwards: usize = 0;
 
     for (0..iterations) |_| {
-        // Mostly stay in the same millisecond, sometimes move forward,
-        // occasionally step backwards.
-        switch (random.uintLessThan(u8, 10)) {
-            0...5 => {},
-            6...8 => manual.advance(random.intRangeAtMost(u64, 1, 5)),
-            else => manual.set(manual.value -| random.intRangeAtMost(u64, 1, 3)),
-        }
+        randomStep(&manual, random);
 
         const id = gen.next() catch |err| switch (err) {
             error.SequenceExhausted => {
@@ -144,20 +149,6 @@ test "property: a generator's ids strictly increase under a random clock" {
     // The walk must actually have exercised both failure paths.
     try std.testing.expect(exhausted > 0);
     try std.testing.expect(backwards > 0);
-}
-
-/// Small sequence field, so exhaustion happens often.
-const SmallSeqId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 3, .tag = struct {} });
-
-/// Moves a manual clock the way the random-clock tests want: mostly
-/// stay in the same millisecond, sometimes move forward, occasionally
-/// step backwards.
-fn randomStep(manual: *clock.ManualClock, random: std.Random) void {
-    switch (random.uintLessThan(u8, 10)) {
-        0...5 => {},
-        6...8 => manual.advance(random.intRangeAtMost(u64, 1, 5)),
-        else => manual.set(manual.value -| random.intRangeAtMost(u64, 1, 3)),
-    }
 }
 
 test "property: the skew tolerance fails exactly when the clock is too far behind" {
@@ -187,6 +178,8 @@ test "property: the skew tolerance fails exactly when the clock is too far behin
                     // keeps the last id's timestamp; never an earlier one.
                     if (manual.value < prev.timestamp()) {
                         try std.testing.expectEqual(prev.timestamp(), id.timestamp());
+                        // Absorbed only when behind by AT MOST the tolerance.
+                        try std.testing.expect(manual.value + tolerance >= prev.timestamp());
                         absorbed += 1;
                     }
                 }
@@ -259,6 +252,42 @@ test "property: a resumed generator always issues ids above the one it resumed f
     // Both outcomes must actually have been exercised.
     try std.testing.expect(resumed_ok > 0);
     try std.testing.expect(behind > 0);
+}
+
+test "property: a generator resumed after a timestamp never issues an id at or before it" {
+    var prng: std.Random.DefaultPrng = .init(0x7e5e7a);
+    const random = prng.random();
+
+    var issued: usize = 0;
+    var waited: usize = 0;
+
+    for (0..2_000) |_| {
+        const reserved = random.intRangeAtMost(SmallSeqId.Timestamp, 900, 1_100);
+        var manual = clock.ManualClock{ .value = random.intRangeAtMost(u64, 900, 1_100) };
+
+        var gen = generator.Generator(SmallSeqId, clock.ManualClock).initAfterTimestamp(.{
+            .node = 5,
+            .clock = &manual,
+        }, reserved);
+
+        for (0..12) |_| {
+            randomStep(&manual, random);
+
+            if (gen.next()) |id| {
+                try std.testing.expect(id.timestamp() > reserved);
+                try std.testing.expect(manual.value > reserved);
+                issued += 1;
+            } else |err| switch (err) {
+                // Still at or behind the reserved millisecond, or the
+                // ordinary limits once past it.
+                error.ClockMovedBackwards, error.SequenceExhausted => waited += 1,
+                error.BeforeEpoch, error.TimestampOverflow => return err,
+            }
+        }
+    }
+
+    try std.testing.expect(issued > 0);
+    try std.testing.expect(waited > 0);
 }
 
 test "property: AtomicGenerator and Generator agree on every call under a random clock" {

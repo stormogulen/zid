@@ -13,6 +13,7 @@ A small, zero-cost, compile-time verified ordered identity primitive.
 zig fetch --save git+https://github.com/stormogulen/zid
 ```
 
+<!-- zig-snippet: unchecked -->
 ```zig
 // build.zig
 const zid = b.dependency("zid", .{ .target = target, .optimize = optimize });
@@ -74,7 +75,8 @@ A couple of things worth knowing if you're adding a new identifier type:
 ## Examples & Tests
 
 ```sh
-zig build test              # unit, property and fuzz-corpus tests
+zig build test              # unit, property and fuzz-corpus tests, plus every README example
+zig build examples           # compile every example without running it
 zig build run                # basic Generator + decode walkthrough
 zig build run-type-safety    # compile-time type distinctness, eql correctness
 zig build run-testing        # deterministic testing with ManualClock
@@ -83,7 +85,11 @@ zig build run-shared-generator  # several threads sharing one AtomicGenerator
 zig build run-benchmark -Doptimize=ReleaseFast  # generator cost vs real-clock throughput
 ```
 
+The Zig examples in this README are compiled and run by `readme_test.zig`,
+which also fails if a README block and its compiled version drift apart.
+
 ## Quick Start
+<!-- zig-snippet: quick-start -->
 ```zig
 const UserId = zid.OrderedId(.{
     .timestamp_bits = 41,
@@ -132,11 +138,16 @@ started process makes no promise about ids the previous run issued, and
 With the same node id, any of these can produce an id that already
 exists. To rule it out, store the last issued id and resume from it:
 
+<!-- zig-snippet: resume-save -->
 ```zig
 // While running, or on shutdown: keep the last id.
 if (gen.lastIssued()) |last| try store.save(&last.toString());
+```
 
-// On start:
+On start, parse it back and resume after it:
+
+<!-- zig-snippet: resume-start -->
+```zig
 const last = try UserId.parse(try store.load());
 var gen = try zid.Generator(UserId, zid.MonotonicClock).initAfter(.{
     .clock = &clock,
@@ -147,10 +158,53 @@ var gen = try zid.Generator(UserId, zid.MonotonicClock).initAfter(.{
 Every new id is greater than `last`. If the clock is behind it, `next()`
 reports `error.ClockMovedBackwards` rather than issuing a duplicate, so
 the caller can wait or fail loudly. `AtomicGenerator` has the same
-`lastIssued` and `initAfter`. A process that can crash can only resume
-from the last id it managed to save, so for strict guarantees save
-before handing out ids (for example, reserve a block ahead of time) or
-give each run its own node id.
+`lastIssued` and `initAfter`.
+
+A process that can crash can only resume from the last id it managed to
+save. For a strict guarantee, either give each run its own node id or
+reserve time ahead: save a timestamp a little in the future *before*
+handing out any id up to it, and resume after it with
+`initAfterTimestamp`:
+
+<!-- zig-snippet: reserve-start -->
+```zig
+const block_ms = 1_000;
+
+// On start: skip everything up to the previous run's reservation.
+const reserved = try store.loadTimestamp();
+var gen = zid.Generator(UserId, zid.MonotonicClock).initAfterTimestamp(.{
+    .clock = &clock,
+    .node = 1,
+}, reserved);
+var reserved_until = reserved;
+
+// The clock is normally a little behind the reservation after a restart:
+// wait that out. Further behind than a block means the clock was set
+// back, so fail loudly instead of spinning.
+const reserved_unix = UserId.unixMillisFromTimestamp(reserved);
+if (reserved_unix -| clock.now() > block_ms) return error.ClockMovedBackwards;
+const spin: zid.SpinWait = .{};
+while (clock.now() <= reserved_unix) spin.wait();
+```
+
+Then, for every id:
+
+<!-- zig-snippet: reserve-each -->
+```zig
+const id = try gen.nextRetrying(zid.SpinWait{});
+if (id.timestamp() > reserved_until) {
+    reserved_until = id.timestamp() +| block_ms;
+    try store.saveTimestamp(reserved_until); // Saved before the id leaves.
+}
+```
+
+Until the clock passes `reserved`, `next()` reports
+`error.ClockMovedBackwards` (or `error.SequenceExhausted` at that exact
+millisecond). `nextRetrying` only waits out the second, which is why the
+snippet waits for the clock first. The trade-off: a restart can wait up
+to `block_ms`, and the store is written about once per block instead of
+once per id. `AtomicGenerator` has
+`initAfterTimestamp` too.
 
 The same clock differences make ids from *different* nodes only roughly
 chronological: each node's clock is anchored separately, so ids from two
@@ -185,6 +239,7 @@ milliseconds from its epoch (41 bits is about 69.7 years). After that,
 `next()` returns `error.TimestampOverflow`. `max_unix_millis` says
 exactly when:
 
+<!-- zig-snippet: lifetime -->
 ```zig
 const expires_at_ms = UserId.max_unix_millis; // last representable Unix ms
 ```
@@ -199,6 +254,7 @@ When all sequence values for the current millisecond are used,
 caller. `nextRetrying` is the common choice: it calls your waiter and
 tries again until the clock moves on.
 
+<!-- zig-snippet: retrying -->
 ```zig
 const id = try gen.nextRetrying(zid.SpinWait{});
 ```
@@ -213,6 +269,7 @@ With `SystemClock`, an NTP correction can move time back a few
 milliseconds. By default that makes `next()` return
 `error.ClockMovedBackwards`. To absorb steps up to a limit instead:
 
+<!-- zig-snippet: skew -->
 ```zig
 var gen = zid.Generator(UserId, zid.SystemClock).init(.{
     .clock = &clock,
@@ -232,6 +289,7 @@ it doesn't need this.
 `AtomicGenerator` has the same API as `Generator`, but `next()` can be
 called from any thread on one shared generator:
 
+<!-- zig-snippet: atomic -->
 ```zig
 var gen = zid.AtomicGenerator(UserId, zid.MonotonicClock).init(.{
     .clock = &clock,
@@ -258,14 +316,19 @@ there is no lock. Things to know:
 
 Ids order by timestamp, then node, then sequence:
 
+<!-- zig-snippet: ordering -->
 ```zig
 std.mem.sort(UserId, ids, {}, UserId.lessThan);
-if (a.order(b) == .lt) { ... }
+if (a.order(b) == .lt) {
+    // a sorts first: an earlier millisecond, or the same one and a
+    // lower node, or the same node and a lower sequence.
+}
 ```
 
 `minAt` and `maxAt` give the smallest and largest id any node can
 produce in a millisecond, which turns a time range into an id range:
 
+<!-- zig-snippet: range -->
 ```zig
 const from = UserId.minAt(try UserId.timestampFromUnixMillis(start_ms));
 const to = UserId.maxAt(try UserId.timestampFromUnixMillis(end_ms));
@@ -279,6 +342,7 @@ No generator is needed for this: the conversions live on the id type.
 `fromParts` takes typed fields, so an out-of-range literal is a compile
 error. For values that arrive at runtime, `fromInts` checks each one:
 
+<!-- zig-snippet: from-ints -->
 ```zig
 const id = try UserId.fromInts(timestamp, node, sequence); // zid.FieldError
 ```
@@ -288,6 +352,7 @@ const id = try UserId.fromInts(timestamp, node, sequence); // zid.FieldError
 The epoch is part of the id type, set in its config. A recent epoch
 makes the timestamp bits last longer (41 bits last about 69 years):
 
+<!-- zig-snippet: epoch -->
 ```zig
 const UserId = zid.OrderedId(.{
     .timestamp_bits = 41,
@@ -307,11 +372,12 @@ u64 Unix milliseconds is a compile error.
 ### Printing ids
 
 `toString()` returns the 13-character encoded id as a `[13]u8`. To print
-it without an intermediate buffer, use `string()` with `{f}`, or
+it without an intermediate buffer, use `fmtString()` with `{f}`, or
 `writeString` on any `std.Io.Writer`:
 
+<!-- zig-snippet: printing -->
 ```zig
-std.log.info("created {f}", .{id.string()}); // created 0DKQ1Z3T5W7A9
+std.log.info("created {f}", .{id.fmtString()}); // created 0DKQ1Z3T5W7A9
 try id.writeString(writer);
 ```
 
@@ -330,6 +396,7 @@ Ids coming from outside (a database column, a URL) go through a
 checked boundary, which rejects anything this layout couldn't have
 produced:
 
+<!-- zig-snippet: boundaries -->
 ```zig
 const from_db = try UserId.fromRaw(raw_value); // error.ReservedBitsSet
 const from_url = try UserId.parse(text); // zid.DecodeError or error.ReservedBitsSet
@@ -348,9 +415,18 @@ calls yet -- is never checked, so an invalid one compiles silently until
 the day it's first used. One line next to the declaration forces the
 check:
 
+<!-- zig-snippet: checked-config -->
 ```zig
-const UserId = zid.OrderedId(.{ ... });
-comptime { _ = UserId; } // an invalid config is a compile error from day one
+const UserId = zid.OrderedId(.{
+    .timestamp_bits = 41,
+    .node_bits = 10,
+    .sequence_bits = 12,
+    .tag = struct {},
+});
+// An invalid config is a compile error from day one:
+comptime {
+    _ = UserId;
+}
 ```
 
 ## License

@@ -95,6 +95,19 @@ fn nanosToMillis(nanoseconds: i96) u64 {
     return std.math.lossyCast(u64, @divTrunc(nanoseconds, std.time.ns_per_ms));
 }
 
+test "SystemClock reads the wall clock" {
+    const io = std.testing.io;
+    var system = SystemClock.init(io);
+
+    // The wall clock can be stepped (by NTP, say) mid-test; that is the
+    // only way these can fail.
+    const before = wallMillis(io);
+    const reading = system.now();
+    const after = wallMillis(io);
+    try std.testing.expect(before <= reading);
+    try std.testing.expect(reading <= after);
+}
+
 test "MonotonicClock starts at the wall clock and never goes backwards" {
     const io = std.testing.io;
 

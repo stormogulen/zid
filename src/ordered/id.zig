@@ -219,8 +219,10 @@ pub fn OrderedId(
 
         /// Wraps the id so `{f}` prints its encoded string instead of the
         /// debug form that `{f}` gives the id itself:
-        /// `std.log.info("created {f}", .{id.string()})`.
-        pub fn string(self: Self) std.fmt.Alt(Self, writeString) {
+        /// `std.log.info("created {f}", .{id.fmtString()})`.
+        /// Named like a formatter, not a conversion: it returns a wrapper
+        /// for `{f}`, where `toString` returns the bytes.
+        pub fn fmtString(self: Self) std.fmt.Alt(Self, writeString) {
             return .{ .data = self };
         }
 
@@ -440,7 +442,7 @@ test "max_unix_millis is the end of the id type's lifetime" {
     try std.testing.expectEqual(error.TimestampOverflow, shifted.timestampFromUnixMillis(shifted.max_unix_millis + 1));
 }
 
-test "writeString and string() print exactly what toString returns" {
+test "writeString and fmtString() print exactly what toString returns" {
     const id = TestId.fromParts(.{ .timestamp = 123_456_789, .node = 5, .sequence = 9 });
     const expected = id.toString();
 
@@ -450,7 +452,7 @@ test "writeString and string() print exactly what toString returns" {
     try id.writeString(&writer);
     try std.testing.expectEqualStrings(&expected, writer.buffered());
 
-    const via_fmt = try std.fmt.bufPrint(&buf, "{f}", .{id.string()});
+    const via_fmt = try std.fmt.bufPrint(&buf, "{f}", .{id.fmtString()});
     try std.testing.expectEqualStrings(&expected, via_fmt);
 
     const via_alt = try std.fmt.bufPrint(&buf, "id={f}!", .{std.fmt.alt(id, .writeString)});
@@ -461,7 +463,7 @@ test "a printed id parses back to the same id" {
     const id = TestId.fromParts(.{ .timestamp = 42, .node = 1023, .sequence = 4095 });
 
     var buf: [encoding.encoded_len]u8 = undefined;
-    const printed = try std.fmt.bufPrint(&buf, "{f}", .{id.string()});
+    const printed = try std.fmt.bufPrint(&buf, "{f}", .{id.fmtString()});
 
     try std.testing.expect(id.eql(try TestId.parse(printed)));
 }

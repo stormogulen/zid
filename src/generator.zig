@@ -28,25 +28,12 @@ pub fn Generator(
     comptime IdType: type,
     comptime ClockType: type,
 ) type {
-    comptime {
-        if (!isContainer(IdType) or !@hasDecl(IdType, "Layout") or !@hasDecl(IdType, "fromParts") or !@hasDecl(IdType, "timestampFromUnixMillis")) {
-            @compileError("Generator's IdType must be a zid.OrderedId type, found " ++ @typeName(IdType));
-        }
-
-        if (!isContainer(ClockType) or !@hasDecl(ClockType, "now")) {
-            @compileError("Generator's ClockType must provide `pub fn now(self: *" ++
-                @typeName(ClockType) ++ ") u64`");
-        }
-
-        const now_fn = @typeInfo(@TypeOf(ClockType.now)).@"fn";
-        if (now_fn.return_type != u64) {
-            @compileError(@typeName(ClockType) ++ ".now must return u64 milliseconds");
-        }
-    }
+    comptime checkTypes("Generator", IdType, ClockType);
 
     return struct {
         const Self = @This();
 
+        pub const Id = IdType;
         pub const Node = IdType.Node;
         pub const Timestamp = IdType.Timestamp;
         pub const NextError = errors.NextError;
@@ -114,6 +101,23 @@ pub fn Generator(
             return self;
         }
 
+        /// Like initAfter, but continues after a whole millisecond:
+        /// every id from the new generator has a timestamp later than
+        /// `reserved`. For the reserve-ahead pattern: persist a timestamp a
+        /// little in the future *before* handing out ids up to it, and
+        /// resume after it on restart. A crash then can't repeat an id,
+        /// even one issued after the last save. Can't fail: no id from
+        /// another node is involved. Until the clock passes `reserved`,
+        /// next() reports `error.ClockMovedBackwards` (clock behind it) or
+        /// `error.SequenceExhausted` (clock at it). `nextRetrying` only
+        /// waits out the second, so wait for the clock to pass `reserved`
+        /// before the first id (the README shows a bounded wait).
+        pub fn initAfterTimestamp(options: Options, reserved: Timestamp) Self {
+            var self = init(options);
+            self.last = lastIdAt(IdType, reserved, options.node);
+            return self;
+        }
+
         /// The most recently issued id, or null before the first one. Store
         /// it (for example with `toString()`) so that a restarted process
         /// can resume with `initAfter` instead of risking repeats.
@@ -124,18 +128,6 @@ pub fn Generator(
         pub fn next(self: *Self) NextError!IdType {
             const timestamp = try IdType.timestampFromUnixMillis(self.clock.now());
             const id = try successor(IdType, self.last, timestamp, self.node, self.skew_tolerance_ms);
-
-            // The generator's core promise: for a fixed node, ids
-            // strictly increase. A real check, not `std.debug.assert`: a
-            // failed assert is undefined behaviour in ReleaseFast, and zid
-            // doesn't choose the caller's build mode. A crash beats
-            // silently handing out a duplicate id. Costs one branch.
-            if (self.last) |last| {
-                if (id.raw() <= last.raw()) {
-                    @panic("zid: generator issued an id that is not greater than the last");
-                }
-            }
-
             self.last = id;
             return id;
         }
@@ -148,15 +140,7 @@ pub fn Generator(
         /// advances, this never returns, so don't pair it with a
         /// `ManualClock` that the waiter doesn't move.
         pub fn nextRetrying(self: *Self, waiter: anytype) NextError!IdType {
-            while (true) {
-                return self.next() catch |err| switch (err) {
-                    error.SequenceExhausted => {
-                        waiter.wait();
-                        continue;
-                    },
-                    else => |e| return e,
-                };
-            }
+            return retryingNext(Self, self, waiter);
         }
     };
 }
@@ -164,6 +148,7 @@ pub fn Generator(
 /// The id that follows `last` when the clock reads `timestamp`. Pure: it
 /// reads no clock and keeps no state, so `Generator` and
 /// `AtomicGenerator` share one definition of the sequencing rules.
+/// Guarantees that the returned id is greater than `last`.
 pub fn successor(
     comptime IdType: type,
     last: ?IdType,
@@ -192,11 +177,96 @@ pub fn successor(
         break :sequence l.sequence() + 1;
     } else 0;
 
-    return IdType.fromParts(.{
+    const id = IdType.fromParts(.{
         .timestamp = timestamp,
         .node = node,
         .sequence = sequence,
     });
+
+    // The generators' core promise: for a fixed node, ids strictly
+    // increase. Checked here, where it is made, so both generators get
+    // it. A real check, not `std.debug.assert`: a failed assert is
+    // undefined behaviour in ReleaseFast, and zid doesn't choose the
+    // caller's build mode. A crash beats silently handing out a
+    // duplicate id. Costs one branch.
+    if (last) |l| {
+        if (id.raw() <= l.raw()) {
+            @panic("zid: successor produced an id that is not greater than the last");
+        }
+    }
+    return id;
+}
+
+/// `nextRetrying` for both generators: `next()` until it reports anything
+/// but `SequenceExhausted`, calling `waiter.wait()` in between.
+pub fn retryingNext(comptime Gen: type, gen: *Gen, waiter: anytype) errors.NextError!Gen.Id {
+    comptime checkWaiter(@TypeOf(waiter));
+
+    while (true) {
+        return gen.next() catch |err| switch (err) {
+            error.SequenceExhausted => {
+                waiter.wait();
+                continue;
+            },
+            else => |e| return e,
+        };
+    }
+}
+
+/// A waiter is any value, or pointer to one, with a `wait()` method.
+/// Checked up front so a wrong one fails at the call site with one message.
+fn checkWaiter(comptime Waiter: type) void {
+    const Target = switch (@typeInfo(Waiter)) {
+        .pointer => |pointer| pointer.child,
+        else => Waiter,
+    };
+    if (!isContainer(Target) or !@hasDecl(Target, "wait")) {
+        @compileError("nextRetrying's waiter must have a `wait()` method (like zid.SpinWait), found " ++
+            @typeName(Waiter));
+    }
+}
+
+/// The largest id `node` can issue at `timestamp`: resuming after it skips
+/// the rest of that millisecond. Shared by both generators'
+/// `initAfterTimestamp`.
+pub fn lastIdAt(comptime IdType: type, timestamp: IdType.Timestamp, node: IdType.Node) IdType {
+    return IdType.fromParts(.{
+        .timestamp = timestamp,
+        .node = node,
+        .sequence = std.math.maxInt(IdType.Sequence),
+    });
+}
+
+/// The compile-time contract both generators place on their type
+/// parameters. Called at the top of `Generator` and `AtomicGenerator`, so
+/// a wrong type fails there with one message naming what's missing.
+pub fn checkTypes(
+    comptime generator_name: []const u8,
+    comptime IdType: type,
+    comptime ClockType: type,
+) void {
+    if (!isContainer(IdType) or !@hasDecl(IdType, "Layout") or !@hasDecl(IdType, "fromParts") or !@hasDecl(IdType, "timestampFromUnixMillis")) {
+        @compileError(generator_name ++ "'s IdType must be a zid.OrderedId type, found " ++ @typeName(IdType));
+    }
+
+    const now_signature = "`pub fn now(self: *" ++ @typeName(ClockType) ++ ") u64`";
+    if (!isContainer(ClockType) or !@hasDecl(ClockType, "now")) {
+        @compileError(generator_name ++ "'s ClockType must provide " ++ now_signature);
+    }
+
+    const now_info = @typeInfo(@TypeOf(ClockType.now));
+    if (now_info != .@"fn") {
+        @compileError(@typeName(ClockType) ++ ".now must be a function: " ++ now_signature);
+    }
+
+    const now_fn = now_info.@"fn";
+    if (now_fn.params.len != 1 or now_fn.params[0].type != *ClockType) {
+        @compileError(@typeName(ClockType) ++ ".now must take exactly `self: *" ++
+            @typeName(ClockType) ++ "`: " ++ now_signature);
+    }
+    if (now_fn.return_type != u64) {
+        @compileError(@typeName(ClockType) ++ ".now must return u64 milliseconds: " ++ now_signature);
+    }
 }
 
 fn isContainer(comptime T: type) bool {
@@ -403,6 +473,41 @@ test "initAfter rejects an id from another node" {
             .clock = &manual,
         }, last),
     );
+}
+
+test "initAfterTimestamp issues nothing until the clock passes the reserved millisecond" {
+    var manual = clock.ManualClock{ .value = 999 };
+    var gen = Generator(TestId, clock.ManualClock).initAfterTimestamp(.{
+        .node = 3,
+        .clock = &manual,
+    }, 1000);
+
+    try std.testing.expectError(error.ClockMovedBackwards, gen.next());
+
+    manual.set(1000); // At the reserved millisecond: all of it is used up.
+    try std.testing.expectError(error.SequenceExhausted, gen.next());
+
+    manual.set(1001);
+    const id = try gen.next();
+    try std.testing.expectEqual(1001, id.timestamp());
+    try std.testing.expectEqual(0, id.sequence());
+    try std.testing.expectEqual(3, id.node());
+}
+
+test "initAfterTimestamp works with a layout without sequence bits" {
+    const NoSequenceId = OrderedId(.{
+        .timestamp_bits = 41,
+        .node_bits = 10,
+        .sequence_bits = 0,
+        .tag = struct {},
+    });
+
+    var manual = clock.ManualClock{ .value = 1000 };
+    var gen = Generator(NoSequenceId, clock.ManualClock).initAfterTimestamp(.{ .node = 1, .clock = &manual }, 1000);
+    try std.testing.expectError(error.SequenceExhausted, gen.next());
+
+    manual.advance(1);
+    try std.testing.expectEqual(1001, (try gen.next()).timestamp());
 }
 
 test "small clock steps back are absorbed within the tolerance" {
