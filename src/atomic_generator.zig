@@ -91,6 +91,14 @@ pub fn AtomicGenerator(
             return self;
         }
 
+        /// The most recently issued id, or null before the first one. Under
+        /// concurrent `next()` calls it is a snapshot: another thread may
+        /// have issued a later id by the time you use the result.
+        pub fn lastIssued(self: *const Self) ?IdType {
+            const observed = self.state.load(.acquire);
+            return if (observed == none) null else @enumFromInt(observed);
+        }
+
         /// Safe to call from any thread. Each id returned is unique and
         /// greater than every id this generator returned before it.
         pub fn next(self: *Self) NextError!IdType {
@@ -153,6 +161,21 @@ test "matches Generator on a single thread" {
             try std.testing.expectError(err, atomic.next());
         }
     }
+}
+
+test "lastIssued follows next() and survives a resume" {
+    var manual = clock.ManualClock{ .value = 1000 };
+    var gen = AtomicGenerator(TestId, clock.ManualClock).init(.{ .node = 2, .clock = &manual });
+
+    try std.testing.expectEqual(null, gen.lastIssued());
+    const id = try gen.next();
+    try std.testing.expectEqual(id, gen.lastIssued().?);
+
+    var resumed = try AtomicGenerator(TestId, clock.ManualClock).initAfter(
+        .{ .node = 2, .clock = &manual },
+        gen.lastIssued().?,
+    );
+    try std.testing.expect((try resumed.next()).raw() > id.raw());
 }
 
 test "reports exhaustion and clock regression" {

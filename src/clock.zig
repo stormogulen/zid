@@ -38,6 +38,9 @@ pub const SystemClock = struct {
 /// Trade-off: any difference in rate between the two clocks accumulates
 /// over the lifetime of the clock. It is normally tiny; create a new
 /// clock (for example at restart) to re-anchor it to the wall clock.
+/// Re-anchoring can land *behind* ids an earlier clock already produced,
+/// so resume a restarted generator with `Generator.initAfter` instead of
+/// relying on the new clock alone.
 pub const MonotonicClock = struct {
     io: std.Io,
     wall_at_start: u64,
@@ -72,7 +75,9 @@ pub const ManualClock = struct {
     }
 
     pub fn advance(self: *ManualClock, amount: u64) void {
-        self.value += amount;
+        // Saturating: a test that advances near the end of u64 gets a
+        // clock stuck at the maximum, not an overflow panic.
+        self.value +|= amount;
     }
 };
 
@@ -113,4 +118,14 @@ test "clock readings outside u64 milliseconds are clamped, not trusted" {
     try std.testing.expectEqual(0, nanosToMillis(-1));
     try std.testing.expectEqual(1_234, nanosToMillis(1_234 * std.time.ns_per_ms + 999));
     try std.testing.expectEqual(std.math.maxInt(u64), nanosToMillis(std.math.maxInt(i96)));
+}
+
+test "ManualClock.advance saturates instead of overflowing" {
+    var manual = ManualClock{ .value = std.math.maxInt(u64) - 1 };
+    manual.advance(5);
+    try std.testing.expectEqual(std.math.maxInt(u64), manual.now());
+
+    manual.set(10);
+    manual.advance(5);
+    try std.testing.expectEqual(15, manual.now());
 }

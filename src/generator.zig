@@ -97,7 +97,10 @@ pub fn Generator(
         }
 
         /// Like init, but continues after `last`, an id this node issued
-        /// earlier: every id from the new generator is greater than it.
+        /// earlier (`lastIssued()` of the previous run): every id from the
+        /// new generator is greater than it. A plain `init` after a
+        /// restart makes no such promise, because a fresh clock can start
+        /// behind the ids the previous run already issued.
         /// If the clock is behind `last` (for example after a restart
         /// with a clock that was set back), next() reports
         /// `error.ClockMovedBackwards` instead of issuing duplicates.
@@ -109,6 +112,13 @@ pub fn Generator(
             var self = init(options);
             self.last = last;
             return self;
+        }
+
+        /// The most recently issued id, or null before the first one. Store
+        /// it (for example with `toString()`) so that a restarted process
+        /// can resume with `initAfter` instead of risking repeats.
+        pub fn lastIssued(self: *const Self) ?IdType {
+            return self.last;
         }
 
         pub fn next(self: *Self) NextError!IdType {
@@ -469,4 +479,40 @@ test "nextRetrying passes other errors through" {
     manual.set(1);
     try std.testing.expectError(error.ClockMovedBackwards, gen.nextRetrying(&waiter));
     try std.testing.expectEqual(0, waiter.waits);
+}
+
+test "lastIssued is null at first, then the id next() just returned" {
+    var manual = clock.ManualClock{ .value = 1000 };
+    var gen = Generator(TestId, clock.ManualClock).init(.{ .node = 1, .clock = &manual });
+
+    try std.testing.expectEqual(null, gen.lastIssued());
+
+    const first = try gen.next();
+    try std.testing.expectEqual(first, gen.lastIssued().?);
+
+    const second = try gen.next();
+    try std.testing.expectEqual(second, gen.lastIssued().?);
+
+    // A failed next() doesn't change it.
+    manual.set(1);
+    try std.testing.expectError(error.ClockMovedBackwards, gen.next());
+    try std.testing.expectEqual(second, gen.lastIssued().?);
+}
+
+test "persisting lastIssued as a string and resuming never repeats an id" {
+    var manual = clock.ManualClock{ .value = 1000 };
+    var before = Generator(TestId, clock.ManualClock).init(.{ .node = 1, .clock = &manual });
+
+    _ = try before.next();
+    _ = try before.next();
+    const stored = before.lastIssued().?.toString();
+
+    // "Restart": the new process's clock starts at the same millisecond.
+    // A plain init would repeat the first id; initAfter does not.
+    var fresh = Generator(TestId, clock.ManualClock).init(.{ .node = 1, .clock = &manual });
+    try std.testing.expectEqual(0, (try fresh.next()).sequence());
+
+    const last = try TestId.parse(&stored);
+    var resumed = try Generator(TestId, clock.ManualClock).initAfter(.{ .node = 1, .clock = &manual }, last);
+    try std.testing.expectEqual(2, (try resumed.next()).sequence());
 }

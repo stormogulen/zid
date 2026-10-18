@@ -117,19 +117,45 @@ pub fn main(init: std.process.Init) !void {
 
 ### Resuming after a restart
 
-Monotonicity only holds within one generator. To keep it across
-restarts, store the last issued id and resume from it:
+Monotonicity and uniqueness only hold within one generator. A freshly
+started process makes no promise about ids the previous run issued, and
+`init` after a restart can repeat them:
+
+- Two runs can issue ids in the same millisecond.
+- A new `MonotonicClock` re-anchors to the wall clock. If the old
+  process's clock had drifted ahead of the wall clock (it runs on
+  monotonic time and the two clocks tick at slightly different rates,
+  so the gap grows with uptime), the new one can start *behind* ids the
+  old one already issued.
+- With `SystemClock`, the system time may simply have been set back.
+
+With the same node id, any of these can produce an id that already
+exists. To rule it out, store the last issued id and resume from it:
 
 ```zig
+// While running, or on shutdown: keep the last id.
+if (gen.lastIssued()) |last| try store.save(&last.toString());
+
+// On start:
+const last = try UserId.parse(try store.load());
 var gen = try zid.Generator(UserId, zid.MonotonicClock).initAfter(.{
     .clock = &clock,
     .node = 1,
-}, last_issued_id); // error.NodeMismatch if it came from another node
+}, last); // error.NodeMismatch if it came from another node
 ```
 
-Every new id is greater than `last_issued_id`. If the clock is behind
-it, `next()` reports `error.ClockMovedBackwards` rather than issuing a
-duplicate.
+Every new id is greater than `last`. If the clock is behind it, `next()`
+reports `error.ClockMovedBackwards` rather than issuing a duplicate, so
+the caller can wait or fail loudly. `AtomicGenerator` has the same
+`lastIssued` and `initAfter`. A process that can crash can only resume
+from the last id it managed to save, so for strict guarantees save
+before handing out ids (for example, reserve a block ahead of time) or
+give each run its own node id.
+
+The same clock differences make ids from *different* nodes only roughly
+chronological: each node's clock is anchored separately, so ids from two
+nodes can sort a few milliseconds off their true creation order. Within
+one node the order is exact.
 
 ### Bit layout
 
