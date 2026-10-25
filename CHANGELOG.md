@@ -12,6 +12,7 @@
 - CI compiles the benchmark (`zig build examples`) and cross-compiles
   the tests for `aarch64-linux` and `riscv64-linux` (`zig build check`,
   informational).
+- CI compiles `Generator` for `x86-linux` (`zig build check-generator`).
 - Package `examples/` with the library.
 
 ### Added

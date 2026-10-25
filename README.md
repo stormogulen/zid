@@ -315,8 +315,9 @@ there is no lock in the generator itself. Things to know:
 - It needs a target where Zig allows 64-bit atomics. With Zig 0.16.0 it
   does not compile for `x86-linux` or `arm-linux-gnueabihf`, whatever
   CPU model was tried (baseline, `pentium`, `i686`, `pentium4`,
-  `cortex_a7`), so use `Generator` on 32-bit targets. CI compiles the
-  tests for `aarch64-linux` and `riscv64-linux` (`zig build check
+  `cortex_a7`), so use `Generator` on 32-bit targets (CI compiles it
+  for `x86-linux`). CI compiles the tests for `aarch64-linux` and
+  `riscv64-linux` (`zig build check
   -Dtarget=...`) but does not run them. Lock-freedom also assumes the
   clock's `now` doesn't block.
 - Ids are ordered by allocation, meaning the order in which the

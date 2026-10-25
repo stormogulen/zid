@@ -36,7 +36,7 @@ jobs:
   # not compile there (see the README).
   cross-compile:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    continue-on-error: false
     strategy:
       fail-fast: false
       matrix:
@@ -47,3 +47,18 @@ jobs:
         with:
           version: 0.16.0
       - run: zig build check -Dtarget=${{ matrix.target }}
+
+  # Generator works on 32-bit targets; AtomicGenerator doesn't compile
+  # there, so this builds only the part that should.
+  cross-compile-32bit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86-linux]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: zig build check-generator -Dtarget=${{ matrix.target }}
