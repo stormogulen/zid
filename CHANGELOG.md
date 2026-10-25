@@ -2,9 +2,22 @@
 
 ## Unreleased
 
+### Documentation and CI
+- Document that `AtomicGenerator` ids are ordered by allocation, not by
+  the order calls return, that it does not compile on 32-bit targets
+  (checked for x86-linux and arm-linux-gnueabihf), and that
+  lock-freedom needs a non-blocking clock.
+- Document that a clock skew tolerance can make `nextRetrying` wait up
+  to the tolerance, and that plain `initAfter` is not crash-safe.
+- CI compiles the benchmark (`zig build examples`) and cross-compiles
+  the tests for `aarch64-linux` and `riscv64-linux` (`zig build check`,
+  informational).
+- Package `examples/` with the library.
+
 ### Added
-- `AtomicGenerator`: lock-free generator that several threads can share
-  for a single node id (compare-and-swap on the last id).
+- `AtomicGenerator`: generator that several threads can share for a
+  single node id (compare-and-swap on the last id). Lock-free; does not
+  compile on 32-bit targets, where `Generator` remains available.
 - `Generator.nextRetrying` / `AtomicGenerator.nextRetrying`: wait out
   `SequenceExhausted` with a caller-supplied waiter; `zid.SpinWait`
   is a ready-made busy-wait.

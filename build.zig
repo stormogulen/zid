@@ -21,6 +21,13 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(tests);
     test_step.dependOn(&run_tests.step);
 
+    // Compiles the unit tests without running them, so CI can check that
+    // the library builds for targets it can't execute. Note that the
+    // tests include AtomicGenerator, which doesn't compile on 32-bit
+    // targets, so `check` fails there (see the README).
+    const check_step = b.step("check", "Compile the unit tests without running them");
+    check_step.dependOn(&tests.step);
+
     // Every Zig block in README.md, compiled, run, and compared with the
     // README text (see readme_test.zig).
     const readme_tests = b.addTest(.{

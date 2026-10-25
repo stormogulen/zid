@@ -1,4 +1,15 @@
-//! Lock-free id generator that several threads can share.
+//! Id generator that several threads can share without a lock.
+//!
+//! Lock-free on targets with native 64-bit compare-and-swap, provided
+//! the clock's `now` is non-blocking too.
+//!
+//! Not available on 32-bit targets: with Zig 0.16.0 it fails to compile
+//! for `x86-linux` (baseline, `pentium`, `i686`, `pentium4`) and
+//! `arm-linux-gnueabihf` (baseline, `cortex_a7`), because Zig rejects
+//! 64-bit atomics there whatever the CPU model. Use `Generator` on such
+//! targets. CI compiles the tests for `aarch64-linux` and
+//! `riscv64-linux` (`zig build check -Dtarget=...`) but does not run
+//! them.
 //!
 //! Responsibilities:
 //!
@@ -102,16 +113,27 @@ pub fn AtomicGenerator(
             return if (observed == none) null else @enumFromInt(observed);
         }
 
-        /// Safe to call from any thread. Each id returned is unique and
-        /// greater than every id this generator returned before it.
+        /// Safe to call from any thread. Each id returned is unique, and
+        /// ids are ordered by when their compare-and-swap succeeded (the
+        /// order they were allocated in). That is not necessarily the
+        /// order in which calls return or in which callers observe the
+        /// ids: a thread can win the swap, be descheduled, and return
+        /// after another thread has already returned a later id. Where
+        /// the order of observation matters, synchronize on it yourself.
         pub fn next(self: *Self) NextError!IdType {
             var observed = self.state.load(.acquire);
 
             while (true) {
-                // Read the clock after loading the state: the reading
-                // is then no earlier than the one that produced
-                // `observed`, so a thread that was descheduled does not
-                // report a step back that never happened.
+                // Read the clock after loading the state. The acquire
+                // load pairs with the release half of the compare-and-
+                // swap that stored `observed`, which that thread did
+                // after its own clock reading. So this reading is no
+                // earlier than that one, provided the clock is monotonic
+                // across threads (`MonotonicClock` is; `SystemClock` is
+                // not, and can still report a real step back). That is
+                // what stops a thread that was descheduled from
+                // reporting a step back that never happened, and it is
+                // why the orderings here are not `.monotonic`.
                 const timestamp = try IdType.timestampFromUnixMillis(self.clock.now());
 
                 const last: ?IdType = if (observed == none) null else @enumFromInt(observed);

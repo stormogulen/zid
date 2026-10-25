@@ -46,7 +46,9 @@ Requires Zig 0.16.0 or newer.
   configured width (`UserId.Node` is a `u10` for 10 node bits), so an
   out-of-range node can't be passed in. Converting a runtime integer is
   the caller's boundary: `std.math.cast(UserId.Node, value)`. Assigning
-  unique ids across a fleet is left to the caller.
+  unique ids across a fleet is left to the caller. Two live generators
+  with the same node id will issue duplicate ids, and zid cannot detect
+  it.
 
 ## Extending zid
 
@@ -160,10 +162,11 @@ reports `error.ClockMovedBackwards` rather than issuing a duplicate, so
 the caller can wait or fail loudly. `AtomicGenerator` has the same
 `lastIssued` and `initAfter`.
 
-A process that can crash can only resume from the last id it managed to
-save. For a strict guarantee, either give each run its own node id or
-reserve time ahead: save a timestamp a little in the future *before*
-handing out any id up to it, and resume after it with
+`initAfter` alone is not crash-safe: a process that crashes can only
+resume from the last id it managed to save, and ids issued after that
+save can be issued again. For a strict guarantee, either give each run
+its own node id or reserve time ahead: save a timestamp a little in the
+future *before* handing out any id up to it, and resume after it with
 `initAfterTimestamp`:
 
 <!-- zig-snippet: reserve-start -->
@@ -263,6 +266,10 @@ A waiter is anything with a `wait(self)` method, so a program with an
 event loop can sleep instead of spinning. Every error other than
 `SequenceExhausted` is returned as is.
 
+Normally the wait is shorter than a millisecond, so `zid.SpinWait` is a
+good fit. With a clock skew tolerance (see below) it can last as long as
+the tolerance, and a sleeping waiter is the better choice.
+
 ### Tolerating small clock steps
 
 With `SystemClock`, an NTP correction can move time back a few
@@ -281,8 +288,11 @@ var gen = zid.Generator(UserId, zid.SystemClock).init(.{
 Within the tolerance the generator keeps issuing ids at the last
 timestamp, so ids stay strictly increasing but run slightly ahead of
 the wall clock, and the sequence can run out sooner. A step larger than
-the tolerance is still an error. `MonotonicClock` never steps back, so
-it doesn't need this.
+the tolerance is still an error. If the sequence runs out while the
+clock is still behind, `next()` returns `error.SequenceExhausted` until
+the clock catches up, which can take up to the tolerance; `nextRetrying`
+with `zid.SpinWait` busy-waits for that long. `MonotonicClock` never
+steps back, so it doesn't need this.
 
 ### Sharing a generator across threads
 
@@ -300,8 +310,19 @@ const id = try gen.nextRetrying(zid.SpinWait{});
 ```
 
 Its whole state is the last id, advanced with a compare-and-swap, so
-there is no lock. Things to know:
+there is no lock in the generator itself. Things to know:
 
+- It needs a target where Zig allows 64-bit atomics. With Zig 0.16.0 it
+  does not compile for `x86-linux` or `arm-linux-gnueabihf`, whatever
+  CPU model was tried (baseline, `pentium`, `i686`, `pentium4`,
+  `cortex_a7`), so use `Generator` on 32-bit targets. CI compiles the
+  tests for `aarch64-linux` and `riscv64-linux` (`zig build check
+  -Dtarget=...`) but does not run them. Lock-freedom also assumes the
+  clock's `now` doesn't block.
+- Ids are ordered by allocation, meaning the order in which the
+  compare-and-swap succeeded. That is not necessarily the order in which
+  `next()` calls return across threads: a thread can win the swap, be
+  descheduled, and return after another thread has returned a later id.
 - It is slower than `Generator` even without contention, because of the
   atomic operation. Run `zig build run-benchmark -Doptimize=ReleaseFast`
   to measure it on your machine. If each thread can have its own node

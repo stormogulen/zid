@@ -87,10 +87,14 @@ fn wallMillis(io: std.Io) u64 {
 
 /// Clock readings come from the operating system, so they are input,
 /// not something to assert on. The wall clock is settable and can read
-/// before 1970; clamp instead of trusting it. A clamped reading then
-/// shows up as a proper error from the generator (`BeforeEpoch`,
-/// `ClockMovedBackwards` or `TimestampOverflow`), never as a crash or
-/// undefined behaviour.
+/// before 1970; clamp instead of trusting it. The clamped reading is 0,
+/// which is a valid Unix time, so it is not an error by itself. What the
+/// generator does with it depends on its state: a generator that has
+/// already issued ids reports `ClockMovedBackwards`; an id type with an
+/// epoch after 1970 reports `BeforeEpoch`; a fresh generator with the
+/// default Unix epoch issues ids at timestamp 0. Never a crash or
+/// undefined behaviour. Use `initAfter` or `initAfterTimestamp` on
+/// restart to rule out the last case.
 fn nanosToMillis(nanoseconds: i96) u64 {
     return std.math.lossyCast(u64, @divTrunc(nanoseconds, std.time.ns_per_ms));
 }

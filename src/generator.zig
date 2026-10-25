@@ -70,8 +70,13 @@ pub fn Generator(
             /// Within the tolerance the generator keeps issuing ids at
             /// the last id's timestamp (so they run slightly ahead of
             /// the wall clock, and may exhaust the sequence sooner)
-            /// instead of failing. Ids still strictly increase. The
-            /// default, 0, reports any backwards step.
+            /// instead of failing. Ids still strictly increase. If the
+            /// sequence runs out while the clock is still behind,
+            /// `next()` returns `error.SequenceExhausted` until the
+            /// clock passes the last id's timestamp. That can take up
+            /// to the tolerance, not the usual sub-millisecond, so
+            /// `nextRetrying` can wait that long. The default, 0,
+            /// reports any backwards step.
             clock_skew_tolerance_ms: u64 = 0,
         };
 
@@ -138,7 +143,10 @@ pub fn Generator(
         /// with a `wait(self)` method: `zid.SpinWait{}` busy-waits, and a
         /// program with an event loop can sleep instead. If the clock never
         /// advances, this never returns, so don't pair it with a
-        /// `ManualClock` that the waiter doesn't move.
+        /// `ManualClock` that the waiter doesn't move. With a nonzero
+        /// `clock_skew_tolerance_ms` the wait can last as long as the
+        /// tolerance (see `Options.clock_skew_tolerance_ms`); use a
+        /// sleeping waiter rather than `zid.SpinWait` if that matters.
         pub fn nextRetrying(self: *Self, waiter: anytype) NextError!IdType {
             return retryingNext(Self, self, waiter);
         }
@@ -379,6 +387,46 @@ test "clock reading before the epoch is rejected" {
     // Exactly at the epoch is timestamp zero.
     manual.set(1_000);
     try std.testing.expectEqual(0, (try gen.next()).timestamp());
+}
+
+test "a clock clamped to zero: fine when fresh, ClockMovedBackwards after ids" {
+    // A wall clock before 1970 is clamped to 0 by the system clocks.
+    // With the default Unix epoch that is timestamp 0, not an error...
+    var manual = clock.ManualClock{ .value = 0 };
+    var gen = Generator(TestId, clock.ManualClock).init(.{
+        .node = 1,
+        .clock = &manual,
+    });
+    try std.testing.expectEqual(0, (try gen.next()).timestamp());
+
+    // ...but once ids exist at a later time, it is a backwards step.
+    manual.set(5_000);
+    _ = try gen.next();
+    manual.set(0);
+    try std.testing.expectError(error.ClockMovedBackwards, gen.next());
+}
+
+test "inside the skew tolerance the sequence can run out while the clock is behind" {
+    var manual = clock.ManualClock{ .value = 1_000 };
+    var gen = Generator(TestId, clock.ManualClock).init(.{
+        .node = 1,
+        .clock = &manual,
+        .clock_skew_tolerance_ms = 5,
+    });
+    _ = try gen.next(); // last timestamp is now 1000, sequence 0
+    manual.set(998); // behind, but within the tolerance
+
+    // Ids keep coming at timestamp 1000 until its sequence is used up...
+    for (0..std.math.maxInt(TestId.Sequence)) |_| {
+        try std.testing.expectEqual(1_000, (try gen.next()).timestamp());
+    }
+    try std.testing.expectError(error.SequenceExhausted, gen.next());
+
+    // ...and stay exhausted until the clock passes 1000. A retry loop
+    // would wait that long (up to the tolerance), not under a millisecond.
+    try std.testing.expectError(error.SequenceExhausted, gen.next());
+    manual.set(1_001);
+    try std.testing.expectEqual(1_001, (try gen.next()).timestamp());
 }
 
 test "timestamp overflow is rejected" {

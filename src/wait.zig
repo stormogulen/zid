@@ -8,7 +8,11 @@
 //!
 //! - Sleep or yield to a scheduler. A sequence runs out for under a
 //!   millisecond, so spinning is usually cheaper than a context switch.
-//!   Bring your own waiter (anything with `wait(self)`) to sleep instead.
+//!   The exception is a generator with a nonzero
+//!   `clock_skew_tolerance_ms` that is running ahead of its clock: the
+//!   wait can then last up to the tolerance, and a sleeping waiter is
+//!   the better choice. Bring your own waiter (anything with
+//!   `wait(self)`) to sleep instead.
 
 const std = @import("std");
 

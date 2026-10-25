@@ -26,5 +26,24 @@ jobs:
       - run: zig build run-threaded
       - run: zig build run-shared-generator
       - run: zig build run-live-clock
+      - run: zig build examples # compiles all examples, including the benchmark
       - run: zig build test -Doptimize=ReleaseSafe
       - run: zig build test -Doptimize=ReleaseFast
+
+  # Compile-only checks for targets CI can't run. Informational: a failure
+  # means that target needs a look, not that the supported hosts are
+  # broken. 32-bit targets are left out on purpose: AtomicGenerator does
+  # not compile there (see the README).
+  cross-compile:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-linux, riscv64-linux]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - run: zig build check -Dtarget=${{ matrix.target }}
