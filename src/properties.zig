@@ -341,6 +341,55 @@ test "property: AtomicGenerator and Generator agree on every call under a random
     }
 }
 
+/// Walks a forward-moving clock and checks the core promise of a
+/// generator type on one layout: for a fixed node, ids strictly increase.
+fn checkLayout(comptime Gen: type, random: std.Random) !void {
+    const Id = Gen.Id;
+    const max_timestamp: u64 = std.math.maxInt(Id.Timestamp);
+    const node = random.int(Id.Node);
+
+    var manual = clock.ManualClock{ .value = 0 };
+    var gen = Gen.init(.{ .node = node, .clock = &manual });
+
+    var previous: ?Id = null;
+    var issued: usize = 0;
+
+    for (0..iterations) |_| {
+        // Mostly stay in the same millisecond, sometimes move on, but
+        // never past the layout's last timestamp.
+        if (random.uintLessThan(u8, 4) == 0 and manual.value < max_timestamp) {
+            manual.advance(1);
+        }
+
+        const id = gen.next() catch |err| switch (err) {
+            error.SequenceExhausted => continue,
+            error.ClockMovedBackwards, error.BeforeEpoch, error.TimestampOverflow => return err,
+        };
+
+        try std.testing.expectEqual(node, id.node());
+        if (previous) |prev| try std.testing.expectEqual(.gt, id.order(prev));
+        previous = id;
+        issued += 1;
+    }
+
+    try std.testing.expect(issued > 0);
+}
+
+test "property: both generators work on every layout, including zero-width fields" {
+    var prng: std.Random.DefaultPrng = .init(0x1a70);
+    const random = prng.random();
+
+    inline for (layouts) |Id| {
+        try checkLayout(generator.Generator(Id, clock.ManualClock), random);
+
+        // AtomicGenerator needs a spare bit, so it can't take the 64-bit
+        // layout.
+        if (comptime Id.Layout.total_bits < 64) {
+            try checkLayout(atomic_generator.AtomicGenerator(Id, clock.ManualClock), random);
+        }
+    }
+}
+
 /// Both fuzz targets first pick one of `layouts` from their first input
 /// value, so the same fuzzing run covers every layout, including the
 /// 1-bit, 0-bit and full 64-bit edge layouts.

@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Documentation and CI
+- Property test running both generators over every test layout,
+  including zero-width fields and the full 64-bit timestamp.
+- Compile-time check that the Base32 alphabet is 32 symbols in strictly
+  increasing ASCII order.
 - Document that `AtomicGenerator` ids are ordered by allocation, not by
   the order calls return, that it does not compile on 32-bit targets
   (checked for x86-linux and arm-linux-gnueabihf), and that

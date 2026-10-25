@@ -21,10 +21,21 @@
 const std = @import("std");
 
 /// Crockford's Base32 alphabet: excludes I, L, O, U to avoid visual
-/// confusion with 1, 1, 0, V. Both the alphabet's symbol order and
-/// its ASCII byte order increase together, which is what makes
-/// lexicographic string comparison agree with numeric comparison.
+/// confusion (I and L with 1, O with 0, U with V). Both the alphabet's
+/// symbol order and its ASCII byte order increase together, which is
+/// what makes lexicographic string comparison agree with numeric
+/// comparison.
 const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+// The sort-preserving property depends on exactly this: 32 symbols,
+// strictly increasing in ASCII order. Checked here so a change to the
+// alphabet fails the build, not just a test that happens to notice.
+comptime {
+    std.debug.assert(alphabet.len == 32);
+    for (alphabet[0 .. alphabet.len - 1], alphabet[1..]) |a, b| {
+        std.debug.assert(a < b);
+    }
+}
 
 const invalid_value: u8 = 0xFF;
 
