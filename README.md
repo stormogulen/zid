@@ -37,11 +37,14 @@ Requires Zig 0.16.0 or newer.
   Give each thread its own `Generator` and node id (see
   `examples/threaded`), or share one node with `AtomicGenerator` (see
   [Sharing a generator across threads](#sharing-a-generator-across-threads)).
-- **Monotonicity is always checked** — the generator's "ids strictly
-  increase" guarantee is a real check (`@panic`), not a `std.debug.assert`,
-  so it holds in every build mode, ReleaseFast included. The other
-  assertions guard zid's own bit math and follow the usual build-mode
-  rules.
+- **One check is always on** — zid's rule: an invariant whose failure
+  would hand you a wrong id is a real check (`@panic`) that stays in
+  every build mode, because zid doesn't choose your build mode and a
+  failed `std.debug.assert` is undefined behaviour in ReleaseFast. Only
+  one invariant qualifies, "ids strictly increase", and it costs one
+  branch per id. The other assertions check things the field types
+  already guarantee (zid's own bit packing), so they use
+  `std.debug.assert` and cost nothing in ReleaseFast.
 - **Node id assignment is out of scope** — node ids are typed to the
   configured width (`UserId.Node` is a `u10` for 10 node bits), so an
   out-of-range node can't be passed in. Converting a runtime integer is
@@ -98,6 +101,7 @@ const UserId = zid.OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 12,
     .tag = struct {},
+    .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
 });
 
 pub fn main(init: std.process.Init) !void {
@@ -122,6 +126,10 @@ pub fn main(init: std.process.Init) !void {
   every change to the system time. If it steps backwards, `next()`
   returns `error.ClockMovedBackwards` until real time catches up.
 - `ManualClock`: set by hand, for deterministic tests.
+- Your own: any struct with `pub fn now(self: *Self) zid.UnixMillis`.
+  Build the reading with `.{ .millis = ... }` or
+  `zid.UnixMillis.fromNanoseconds(...)`, so the unit is stated where the
+  reading is made; a clock that returns a bare integer doesn't compile.
 
 ### Resuming after a restart
 
@@ -185,9 +193,9 @@ var reserved_until = reserved;
 // wait that out. Further behind than a block means the clock was set
 // back, so fail loudly instead of spinning.
 const reserved_unix = UserId.unixMillisFromTimestamp(reserved);
-if (reserved_unix -| clock.now() > block_ms) return error.ClockMovedBackwards;
+if (reserved_unix -| clock.now().millis > block_ms) return error.ClockMovedBackwards;
 const spin: zid.SpinWait = .{};
-while (clock.now() <= reserved_unix) spin.wait();
+while (clock.now().millis <= reserved_unix) spin.wait();
 ```
 
 Then, for every id:
@@ -247,8 +255,9 @@ exactly when:
 const expires_at_ms = UserId.max_unix_millis; // last representable Unix ms
 ```
 
-With the default Unix epoch and 41 bits that is 2039-09-07, so pick a
-recent `.epoch` for new systems.
+With the 2025-01-01 epoch used throughout this README and 41 bits, that
+is in 2094. With `.unix` it would be 2039-09-07, which is why the epoch
+has no default.
 
 ### Waiting out sequence exhaustion
 
@@ -315,11 +324,13 @@ there is no lock in the generator itself. Things to know:
 - It needs a target where Zig allows 64-bit atomics. With Zig 0.16.0 it
   does not compile for `x86-linux` or `arm-linux-gnueabihf`, whatever
   CPU model was tried (baseline, `pentium`, `i686`, `pentium4`,
-  `cortex_a7`), so use `Generator` on 32-bit targets (CI compiles it
-  for `x86-linux`). CI compiles the tests for `aarch64-linux` and
-  `riscv64-linux` (`zig build check
-  -Dtarget=...`) but does not run them. Lock-freedom also assumes the
-  clock's `now` doesn't block.
+  `cortex_a7`), so use `Generator` on 32-bit targets: there,
+  `AtomicGenerator` is a compile error saying so, and
+  `zid.atomic_generator_supported` lets code that builds for both
+  pick one at compile time. CI runs the tests on `x86-linux` and
+  compiles them for `aarch64-linux`, `riscv64-linux` and
+  `arm-linux-gnueabihf` (`zig build check -Dtarget=...`). Lock-freedom
+  also assumes the clock's `now` doesn't block.
 - Ids are ordered by allocation, meaning the order in which the
   compare-and-swap succeeded. That is not necessarily the order in which
   `next()` calls return across threads: a thread can win the swap, be
@@ -371,8 +382,11 @@ const id = try UserId.fromInts(timestamp, node, sequence); // zid.FieldError
 
 ### Epochs
 
-The epoch is part of the id type, set in its config. A recent epoch
-makes the timestamp bits last longer (41 bits last about 69 years):
+The epoch is part of the id type, and every config must set one: it
+decides when the id type runs out, so it shouldn't be a default nobody
+chose. A recent epoch makes the timestamp bits last longer (41 bits last
+about 69 years). `.unix` is there for tests and for formats that really
+count from 1970:
 
 <!-- zig-snippet: epoch -->
 ```zig
@@ -405,12 +419,20 @@ try id.writeString(writer);
 
 Plain `{f}` on the id itself prints the debug form with the decoded
 fields, `OrderedId(<raw>)[t=..,n=..,s=..]`, which is better for logs you
-read than for strings you parse.
+read than for strings you parse. Set `.name` in the config (for example
+`.name = "UserId"`) and it prints `UserId(<raw>)[...]` instead, so a log
+line says which id type it shows. The name is only for display; it isn't
+part of the encoded string.
 
 Decoding is strict on purpose: `parse` accepts only the 32 uppercase
 alphabet characters, exactly 13 of them. Lowercase letters and
 look-alikes such as `O` or `l` are rejected rather than guessed at, so
-every id has exactly one valid spelling.
+every id has exactly one valid spelling, and two strings name the same
+id only if they are equal. That is stricter than Crockford's Base32,
+whose alphabet zid uses: his decoding rules also accept lowercase and
+read `I` and `L` as `1` and `O` as `0`. zid keeps the alphabet and
+leaves those rules out; normalize user-typed input yourself before
+`parse` if you want them.
 
 ### Boundaries
 
@@ -444,6 +466,7 @@ const UserId = zid.OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 12,
     .tag = struct {},
+    .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
 });
 // An invalid config is a compile error from day one:
 comptime {

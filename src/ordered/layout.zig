@@ -23,9 +23,20 @@ pub const Config = struct {
     sequence_bits: u8,
     /// Makes ids with otherwise identical configs distinct types.
     tag: type,
+    /// What `{f}` calls the id, so a log line shows which id type it is:
+    /// `UserId(…)[t=…]` rather than `OrderedId(…)[t=…]` for every type.
+    /// Only for display; the encoded string doesn't include it.
+    name: []const u8 = "OrderedId",
     /// What the timestamp counts from. Part of the id's format: ids
     /// with different epochs are different types, and can't be mixed.
-    epoch: Epoch = .unix,
+    ///
+    /// Required, because it decides how long the id type lasts: the
+    /// timestamp field runs out `2^timestamp_bits - 1` milliseconds after
+    /// the epoch. With 41 bits that is about 69 years, so `.unix` runs
+    /// out in 2039 while an epoch of 2025-01-01 lasts until 2094. Pick a
+    /// date shortly before the first id is made; `.unix` is there for
+    /// tests and for formats that really count from 1970.
+    epoch: Epoch,
 };
 
 pub fn Layout(comptime config: Config) type {
@@ -105,6 +116,7 @@ test "layout round trip" {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     const parts: L.Parts = .{ .timestamp = 1234, .node = 7, .sequence = 42 };
@@ -117,6 +129,7 @@ test "field types are sized exactly to the layout" {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     try std.testing.expectEqual((1 << 41) - 1, std.math.maxInt(L.Timestamp));
@@ -131,6 +144,7 @@ test "a full 64-bit layout uses every bit" {
         .node_bits = 0,
         .sequence_bits = 0,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     try std.testing.expectEqual(std.math.maxInt(u64), L.used_mask);
@@ -145,6 +159,7 @@ test "maximum field values pack without spilling into neighbours" {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     const parts: L.Parts = .{

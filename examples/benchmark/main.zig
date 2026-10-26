@@ -24,6 +24,7 @@ const BenchId = zid.OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 12,
     .tag = struct {},
+    .epoch = .unix,
 });
 
 const iterations = 10_000_000;

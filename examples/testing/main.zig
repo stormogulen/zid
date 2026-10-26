@@ -6,6 +6,7 @@ const DeterministicId = zid.OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 2, // deliberately tiny: max_sequence == 3, easy to exhaust
     .tag = struct {},
+    .epoch = .unix,
 });
 
 /// Checks a result in every build mode. `std.debug.assert` is for

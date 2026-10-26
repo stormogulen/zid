@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Documentation and CI
+- Both generators are checked against an independent reference model
+  (a property test over every layout, and a fuzz target driving random
+  clock walks). The model doesn't use `successor`, so it catches bugs the
+  generators would share; for example a new millisecond starting at
+  sequence 1, which keeps ids increasing and passed every earlier
+  property test.
 - Property test running both generators over every test layout,
   including zero-width fields and the full 64-bit timestamp.
 - Compile-time check that the Base32 alphabet is 32 symbols in strictly
@@ -13,13 +19,21 @@
   lock-freedom needs a non-blocking clock.
 - Document that a clock skew tolerance can make `nextRetrying` wait up
   to the tolerance, and that plain `initAfter` is not crash-safe.
-- CI compiles the benchmark (`zig build examples`) and cross-compiles
-  the tests for `aarch64-linux` and `riscv64-linux` (`zig build check`,
-  informational).
-- CI compiles `Generator` for `x86-linux` (`zig build check-generator`).
+- CI compiles the benchmark (`zig build examples`), compiles the tests
+  for `aarch64-linux`, `riscv64-linux` and `arm-linux-gnueabihf`
+  (`zig build check -Dtarget=...`), and runs them on `x86-linux`.
 - Package `examples/` with the library.
 
 ### Added
+- `zid.UnixMillis`, what every clock's `now` returns: a struct with a
+  `millis` field and `fromNanoseconds`, so the unit is written where a
+  reading is made.
+- `Config.name`: what `{f}` calls the id (`UserId(…)[t=…]`), so log
+  lines say which id type they show. Display only; defaults to
+  `OrderedId`.
+- `zid.atomic_generator_supported`: whether the target has the 64-bit
+  atomics `AtomicGenerator` needs, for code that builds for both 32- and
+  64-bit targets.
 - `AtomicGenerator`: generator that several threads can share for a
   single node id (compare-and-swap on the last id). Lock-free; does not
   compile on 32-bit targets, where `Generator` remains available.
@@ -59,6 +73,26 @@
 - A test for `SystemClock`.
 
 ### Changed
+- **Breaking:** a clock's `now` returns `zid.UnixMillis` instead of a
+  bare `u64`. Custom clocks change `return ms;` to
+  `return .{ .millis = ms };`. The built-in clocks share one
+  nanoseconds-to-milliseconds conversion.
+- Docs: zid uses Crockford's Base32 alphabet but not his lenient
+  decoding (lowercase, `I`/`L` as `1`, `O` as `0`), so every id has
+  exactly one string. Said plainly in the code and README now.
+- The README's reserve-ahead test waits 20 ms instead of up to a second.
+- **Breaking:** `Config.epoch` is required. It used to default to
+  `.unix`, which with the common 41-bit timestamp runs out in 2039; a
+  recent epoch such as 2025-01-01 lasts until 2094. Add
+  `.epoch = .unix` to keep the old behaviour. The README and examples
+  now use a 2025-01-01 epoch.
+- On a 32-bit target, `AtomicGenerator` is one clear compile error
+  ("needs 64-bit atomics ... use Generator there") instead of several
+  from inside `std.atomic`, and the rest of the test suite builds and
+  runs there. `zig build check-generator` is gone; `zig build check`
+  covers 32-bit targets.
+- The Base32 alphabet's compile-time check names the problem (wrong
+  length, or which pair is out of order) instead of failing an assert.
 - Both generators' `nextRetrying` share one implementation, which checks
   up front that the waiter has a `wait()` method (a clear compile error
   instead of one from inside the loop).

@@ -7,9 +7,10 @@
 //! for `x86-linux` (baseline, `pentium`, `i686`, `pentium4`) and
 //! `arm-linux-gnueabihf` (baseline, `cortex_a7`), because Zig rejects
 //! 64-bit atomics there whatever the CPU model. Use `Generator` on such
-//! targets. CI compiles the tests for `aarch64-linux` and
-//! `riscv64-linux` (`zig build check -Dtarget=...`) but does not run
-//! them.
+//! targets; `zid.atomic_generator_supported` says which kind of target
+//! this is. CI runs the tests on `x86-linux` (without this file's) and
+//! compiles them for `aarch64-linux`, `riscv64-linux` and
+//! `arm-linux-gnueabihf` (`zig build check -Dtarget=...`).
 //!
 //! Responsibilities:
 //!
@@ -31,10 +32,13 @@
 //!   "nothing issued yet", so it can never be a real id.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const errors = @import("errors.zig");
 const generator = @import("generator.zig");
 const clock = @import("clock.zig");
 const OrderedId = @import("ordered/id.zig").OrderedId;
+
+const supported = @import("target.zig").has_64_bit_atomics;
 
 pub fn AtomicGenerator(
     comptime IdType: type,
@@ -42,6 +46,12 @@ pub fn AtomicGenerator(
 ) type {
     comptime {
         generator.checkTypes("AtomicGenerator", IdType, ClockType);
+        // Checked here so a 32-bit target gets one clear error instead of
+        // several from inside std.atomic.
+        if (!supported) {
+            @compileError("AtomicGenerator needs 64-bit atomics, which Zig doesn't provide on 32-bit targets like " ++
+                @tagName(builtin.cpu.arch) ++ "; use Generator there");
+        }
         if (IdType.Layout.total_bits == 64) {
             @compileError("AtomicGenerator needs a layout with at least one unused bit; use Generator for a 64-bit layout");
         }
@@ -60,6 +70,11 @@ pub fn AtomicGenerator(
 
         // Internal state; construct with init/initAfter.
         clock: *ClockType,
+        /// Stored separately, unlike in `Generator`: the compare-and-swap
+        /// needs the whole state in one u64, and the node is needed
+        /// before there is an id to carry it. Must equal the node of the
+        /// id in `state`; init/initAfter guarantee it, and `next()`
+        /// asserts it.
         node: Node,
         skew_tolerance_ms: u64,
         /// Raw value of the most recently issued id, or `none`.
@@ -134,9 +149,10 @@ pub fn AtomicGenerator(
                 // what stops a thread that was descheduled from
                 // reporting a step back that never happened, and it is
                 // why the orderings here are not `.monotonic`.
-                const timestamp = try IdType.timestampFromUnixMillis(self.clock.now());
+                const timestamp = try IdType.timestampFromUnixMillis(self.clock.now().millis);
 
                 const last: ?IdType = if (observed == none) null else @enumFromInt(observed);
+                if (last) |l| std.debug.assert(l.node() == self.node);
                 // `successor` panics rather than return an id at or below
                 // `last`, so the compare-and-swap only ever moves forward.
                 const id = try generator.successor(IdType, last, timestamp, self.node, self.skew_tolerance_ms);
@@ -160,6 +176,7 @@ const TestId = OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 12,
     .tag = struct {},
+    .epoch = .unix,
 });
 
 test "matches Generator on a single thread" {
@@ -198,7 +215,7 @@ test "lastIssued follows next() and survives a resume" {
 }
 
 test "reports exhaustion and clock regression" {
-    const TinyId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 1, .tag = struct {} });
+    const TinyId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 1, .tag = struct {}, .epoch = .unix });
     var manual = clock.ManualClock{ .value = 1000 };
     var gen = AtomicGenerator(TinyId, clock.ManualClock).init(.{ .node = 1, .clock = &manual });
 

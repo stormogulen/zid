@@ -11,6 +11,7 @@ const SharedId = zid.OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 12,
     .tag = struct {},
+    .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
 });
 
 const Gen = zid.AtomicGenerator(SharedId, zid.MonotonicClock);

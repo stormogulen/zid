@@ -22,6 +22,7 @@ const shared = struct {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
     });
 
     // ------------------------------------------------------- Resuming after a restart
@@ -103,9 +104,9 @@ const shared = struct {
         // wait that out. Further behind than a block means the clock was set
         // back, so fail loudly instead of spinning.
         const reserved_unix = UserId.unixMillisFromTimestamp(reserved);
-        if (reserved_unix -| clock.now() > block_ms) return error.ClockMovedBackwards;
+        if (reserved_unix -| clock.now().millis > block_ms) return error.ClockMovedBackwards;
         const spin: zid.SpinWait = .{};
-        while (clock.now() <= reserved_unix) spin.wait();
+        while (clock.now().millis <= reserved_unix) spin.wait();
         // end snippet
 
         for (ids) |*slot| {
@@ -128,10 +129,17 @@ const shared = struct {
 
         var first: [20_000]UserId = @splat(.minAt(0));
         try runReservingAhead(std.testing.io, &store, &first);
+
+        // Pretend the first run was near the end of its block, so its
+        // reservation ends 20 ms from now rather than up to a second: the
+        // second run then waits 20 ms, which keeps the test fast and still
+        // exercises the wait. The first run's ids are all at or before now.
+        var probe = zid.MonotonicClock.init(std.testing.io);
+        store.timestamp = try UserId.timestampFromUnixMillis(probe.now().millis + 20);
         const reserved_by_first = store.timestamp;
 
         // A restart straight away: the second run waits out the reservation
-        // (under a second) and then issues only later ids.
+        // and then issues only later ids.
         var second: [20_000]UserId = @splat(.minAt(0));
         try runReservingAhead(std.testing.io, &store, &second);
         try std.testing.expect(second[0].timestamp() > reserved_by_first);
@@ -149,13 +157,15 @@ const shared = struct {
         const expires_at_ms = UserId.max_unix_millis; // last representable Unix ms
         // end snippet
 
-        try std.testing.expectEqual((1 << 41) - 1, expires_at_ms);
+        // 2^41 - 1 ms after the 2025-01-01 epoch: in 2094.
+        try std.testing.expectEqual(1_735_689_600_000 + (1 << 41) - 1, expires_at_ms);
     }
 
     // ------------------------------------------------- Waiting out sequence exhaustion
 
     test "README: nextRetrying" {
-        var manual = zid.ManualClock{ .value = 1_000 };
+        // 1 s after the epoch, so the timestamp is 1_000.
+        var manual = zid.ManualClock{ .value = UserId.epoch.unix_millis + 1_000 };
         var gen = zid.Generator(UserId, zid.ManualClock).init(.{ .clock = &manual, .node = 1 });
 
         // snippet: retrying
@@ -184,6 +194,9 @@ const shared = struct {
     // ------------------------------------------- Sharing a generator across threads
 
     test "README: AtomicGenerator" {
+        // AtomicGenerator is a compile error on 32-bit targets by design.
+        if (comptime !zid.atomic_generator_supported) return error.SkipZigTest;
+
         var clock = zid.MonotonicClock.init(std.testing.io);
 
         // snippet: atomic
@@ -218,8 +231,8 @@ const shared = struct {
     }
 
     test "README: range queries" {
-        const start_ms: u64 = 1_000;
-        const end_ms: u64 = 2_000;
+        const start_ms: u64 = UserId.epoch.unix_millis + 1_000;
+        const end_ms: u64 = UserId.epoch.unix_millis + 2_000;
 
         // snippet: range
         const from = UserId.minAt(try UserId.timestampFromUnixMillis(start_ms));
@@ -286,6 +299,7 @@ const quick_start = struct {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
     });
 
     pub fn main(init: std.process.Init) !void {
@@ -339,6 +353,7 @@ const checked_config = struct {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
     });
     // An invalid config is a compile error from day one:
     comptime {

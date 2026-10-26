@@ -38,21 +38,28 @@ pub fn Generator(
         pub const Timestamp = IdType.Timestamp;
         pub const NextError = errors.NextError;
 
+        /// Where the generator is. Before the first id only the node is
+        /// known; after it, the last id carries the node along with the
+        /// timestamp and sequence. Keeping the node in one place means
+        /// the node and the last id can't disagree.
+        pub const State = union(enum) {
+            /// Nothing issued yet; ids will be for this node.
+            fresh: Node,
+            /// The most recently issued id (or the one to resume after).
+            after: IdType,
+        };
+
         // Internal state. Zig has no private fields, so these are
         // visible, but they are not part of the API: construct with
         // init/initAfter and never write them afterwards. Changing
-        // `last` or `node` directly can break the monotonicity and
-        // uniqueness guarantees.
+        // `state` directly can break the monotonicity and uniqueness
+        // guarantees.
 
         clock: *ClockType,
-        node: Node,
         /// How far behind the last id the clock may read before `next()`
         /// gives up. See `Options.clock_skew_tolerance_ms`.
         skew_tolerance_ms: u64,
-        /// The most recently returned id, or null before the first
-        /// call to next(). Its timestamp and sequence are all the
-        /// state the generator needs.
-        last: ?IdType = null,
+        state: State,
 
         pub const Options = struct {
             /// Sized to the layout's node field, so an out-of-range
@@ -83,8 +90,8 @@ pub fn Generator(
         pub fn init(options: Options) Self {
             return .{
                 .clock = options.clock,
-                .node = options.node,
                 .skew_tolerance_ms = options.clock_skew_tolerance_ms,
+                .state = .{ .fresh = options.node },
             };
         }
 
@@ -102,7 +109,7 @@ pub fn Generator(
             }
 
             var self = init(options);
-            self.last = last;
+            self.state = .{ .after = last };
             return self;
         }
 
@@ -119,7 +126,7 @@ pub fn Generator(
         /// before the first id (the README shows a bounded wait).
         pub fn initAfterTimestamp(options: Options, reserved: Timestamp) Self {
             var self = init(options);
-            self.last = lastIdAt(IdType, reserved, options.node);
+            self.state = .{ .after = lastIdAt(IdType, reserved, options.node) };
             return self;
         }
 
@@ -127,13 +134,20 @@ pub fn Generator(
         /// it (for example with `toString()`) so that a restarted process
         /// can resume with `initAfter` instead of risking repeats.
         pub fn lastIssued(self: *const Self) ?IdType {
-            return self.last;
+            return switch (self.state) {
+                .fresh => null,
+                .after => |last| last,
+            };
         }
 
         pub fn next(self: *Self) NextError!IdType {
-            const timestamp = try IdType.timestampFromUnixMillis(self.clock.now());
-            const id = try successor(IdType, self.last, timestamp, self.node, self.skew_tolerance_ms);
-            self.last = id;
+            const timestamp = try IdType.timestampFromUnixMillis(self.clock.now().millis);
+            const last: ?IdType, const node: Node = switch (self.state) {
+                .fresh => |fresh_node| .{ null, fresh_node },
+                .after => |previous| .{ previous, previous.node() },
+            };
+            const id = try successor(IdType, last, timestamp, node, self.skew_tolerance_ms);
+            self.state = .{ .after = id };
             return id;
         }
 
@@ -193,10 +207,16 @@ pub fn successor(
 
     // The generators' core promise: for a fixed node, ids strictly
     // increase. Checked here, where it is made, so both generators get
-    // it. A real check, not `std.debug.assert`: a failed assert is
-    // undefined behaviour in ReleaseFast, and zid doesn't choose the
-    // caller's build mode. A crash beats silently handing out a
-    // duplicate id. Costs one branch.
+    // it.
+    //
+    // zid's rule for checks: an invariant whose failure would hand the
+    // caller a wrong id gets a real check (`@panic`), kept in every build
+    // mode, because a library doesn't choose the caller's build mode and a
+    // failed `std.debug.assert` is undefined behaviour in ReleaseFast. This
+    // is the only one: it costs one branch per id. Everything else (the
+    // bit packing in Layout, fromParts's round trip) is guaranteed by the
+    // field types and checked with `std.debug.assert`, which costs nothing
+    // in ReleaseFast. See "Design Constraints" in the README.
     if (last) |l| {
         if (id.raw() <= l.raw()) {
             @panic("zid: successor produced an id that is not greater than the last");
@@ -257,7 +277,7 @@ pub fn checkTypes(
         @compileError(generator_name ++ "'s IdType must be a zid.OrderedId type, found " ++ @typeName(IdType));
     }
 
-    const now_signature = "`pub fn now(self: *" ++ @typeName(ClockType) ++ ") u64`";
+    const now_signature = "`pub fn now(self: *" ++ @typeName(ClockType) ++ ") zid.UnixMillis`";
     if (!isContainer(ClockType) or !@hasDecl(ClockType, "now")) {
         @compileError(generator_name ++ "'s ClockType must provide " ++ now_signature);
     }
@@ -272,8 +292,8 @@ pub fn checkTypes(
         @compileError(@typeName(ClockType) ++ ".now must take exactly `self: *" ++
             @typeName(ClockType) ++ "`: " ++ now_signature);
     }
-    if (now_fn.return_type != u64) {
-        @compileError(@typeName(ClockType) ++ ".now must return u64 milliseconds: " ++ now_signature);
+    if (now_fn.return_type != clock.UnixMillis) {
+        @compileError(@typeName(ClockType) ++ ".now must return zid.UnixMillis, which names its unit: " ++ now_signature);
     }
 }
 
@@ -289,6 +309,7 @@ const TestId = OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 12,
     .tag = struct {},
+    .epoch = .unix,
 });
 
 test "first id starts at sequence zero" {
@@ -327,6 +348,7 @@ test "sequence exhaustion is reported, not silently wrapped" {
         .node_bits = 10,
         .sequence_bits = 1,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     var manual = clock.ManualClock{ .value = 1000 };
@@ -437,6 +459,7 @@ test "timestamp overflow is rejected" {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     // One past max_timestamp (3), with the default unix epoch (offset 0),
@@ -460,6 +483,7 @@ test "a layout without sequence bits allows one id per millisecond" {
         .node_bits = 10,
         .sequence_bits = 0,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     var manual = clock.ManualClock{ .value = 1000 };
@@ -548,6 +572,7 @@ test "initAfterTimestamp works with a layout without sequence bits" {
         .node_bits = 10,
         .sequence_bits = 0,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     var manual = clock.ManualClock{ .value = 1000 };
@@ -607,6 +632,7 @@ test "nextRetrying waits out sequence exhaustion" {
         .node_bits = 10,
         .sequence_bits = 1,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     var manual = clock.ManualClock{ .value = 1000 };

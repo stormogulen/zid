@@ -6,6 +6,7 @@ const UserId = zid.OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 12,
     .tag = struct {},
+    .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
 });
 
 const OrderId = zid.OrderedId(.{
@@ -13,6 +14,7 @@ const OrderId = zid.OrderedId(.{
     .node_bits = 10,
     .sequence_bits = 12,
     .tag = struct {},
+    .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
 });
 
 // Positive assertion: types with the same bit layout but different

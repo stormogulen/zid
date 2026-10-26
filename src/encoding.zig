@@ -10,6 +10,15 @@
 //! - Decode that string back into a u64, rejecting malformed input
 //!   instead of silently truncating or wrapping.
 //!
+//! Crockford's alphabet, not Crockford's decoding. His spec also has
+//! the decoder accept lowercase and read `I` and `L` as `1` and `O` as
+//! `0`. zid's decoder doesn't: it accepts exactly the uppercase
+//! characters the encoder writes. That gives every value exactly one
+//! valid string, so two strings name the same id if and only if they
+//! are equal, which matters when the string is a database key or a URL.
+//! Normalize user-typed input yourself before `parse` if you want the
+//! lenient rules. Crockford's optional check symbol isn't used either.
+//!
 //! Does NOT:
 //!
 //! - Know about OrderedId, layouts, node ids, or clocks. Encodes and
@@ -31,9 +40,16 @@ const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 // strictly increasing in ASCII order. Checked here so a change to the
 // alphabet fails the build, not just a test that happens to notice.
 comptime {
-    std.debug.assert(alphabet.len == 32);
-    for (alphabet[0 .. alphabet.len - 1], alphabet[1..]) |a, b| {
-        std.debug.assert(a < b);
+    if (alphabet.len != 32) {
+        @compileError(std.fmt.comptimePrint("Base32 alphabet must have 32 symbols, has {d}", .{alphabet.len}));
+    }
+    for (alphabet[0 .. alphabet.len - 1], alphabet[1..], 0..) |a, b, i| {
+        if (a >= b) {
+            @compileError(std.fmt.comptimePrint(
+                "Base32 alphabet must be in strictly increasing ASCII order: '{c}' (index {d}) is not below '{c}'",
+                .{ a, i, b },
+            ));
+        }
     }
 }
 
@@ -60,7 +76,9 @@ pub const encoded_len = 13;
 pub const DecodeError = error{
     /// Input was not exactly `encoded_len` bytes.
     InvalidLength,
-    /// Input contained a byte outside the Crockford alphabet.
+    /// Input contained a byte outside the alphabet. That includes
+    /// lowercase letters and `I`, `L`, `O` and `U`, which Crockford's own
+    /// decoding would accept or map; see the top of this file.
     InvalidCharacter,
     /// The leading character encoded a value greater than 4 bits can
     /// hold, so the string represents a number larger than a u64. Such

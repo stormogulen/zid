@@ -230,14 +230,14 @@ pub fn OrderedId(
             const parts = self.decode();
 
             try writer.print(
-                "OrderedId({d})[t={d},n={d},s={d}]",
-                .{ self.raw(), parts.timestamp, parts.node, parts.sequence },
+                "{s}({d})[t={d},n={d},s={d}]",
+                .{ config.name, self.raw(), parts.timestamp, parts.node, parts.sequence },
             );
         }
     };
 }
 
-const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
+const TestId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {}, .epoch = .unix });
 
 test "fromParts accepts every field at its maximum" {
     const id = TestId.fromParts(.{
@@ -283,6 +283,7 @@ test "identical bit widths still produce distinct types" {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     const B = OrderedId(.{
@@ -290,6 +291,7 @@ test "identical bit widths still produce distinct types" {
         .node_bits = 10,
         .sequence_bits = 12,
         .tag = struct {},
+        .epoch = .unix,
     });
 
     // Type comparison happens at compile time: if the two `tag`
@@ -329,6 +331,27 @@ test "format produces the expected string" {
     );
 
     try std.testing.expectEqualStrings(expected, formatted);
+}
+
+test "format uses the config's name" {
+    const UserId = OrderedId(.{
+        .timestamp_bits = 41,
+        .node_bits = 10,
+        .sequence_bits = 12,
+        .tag = struct {},
+        .epoch = .unix,
+        .name = "UserId",
+    });
+    const id = UserId.fromParts(.{ .timestamp = 1, .node = 2, .sequence = 3 });
+
+    var buf: [128]u8 = undefined;
+    const formatted = try std.fmt.bufPrint(&buf, "{f}", .{id});
+    try std.testing.expect(std.mem.startsWith(u8, formatted, "UserId("));
+    try std.testing.expect(std.mem.endsWith(u8, formatted, ")[t=1,n=2,s=3]"));
+
+    // The encoded string is the same whatever the name.
+    const unnamed = TestId.fromParts(.{ .timestamp = 1, .node = 2, .sequence = 3 });
+    try std.testing.expectEqualStrings(&unnamed.toString(), &id.toString());
 }
 
 test "toString/parse round trip preserves the id" {
@@ -415,7 +438,7 @@ test "timestampFromUnixMillis rejects times before the epoch and past the layout
 }
 
 test "ids with different epochs are different types" {
-    const UnixId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {} });
+    const UnixId = OrderedId(.{ .timestamp_bits = 41, .node_bits = 10, .sequence_bits = 12, .tag = struct {}, .epoch = .unix });
     try std.testing.expect(UnixId != AppId);
 }
 
