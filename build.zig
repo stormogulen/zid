@@ -27,6 +27,19 @@ pub fn build(b: *std.Build) void {
     const check_step = b.step("check", "Compile the unit tests without running them");
     check_step.dependOn(&tests.step);
 
+    // Compiles Generator and the id code, without AtomicGenerator, so CI
+    // can check the part of the library that is meant to work on 32-bit
+    // targets (see the README). Compile-only, like `check`.
+    const check_generator_step = b.step("check-generator", "Compile the Generator tests without running them");
+    const generator_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/generator.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    check_generator_step.dependOn(&generator_tests.step);
+
     // Every Zig block in README.md, compiled, run, and compared with the
     // README text (see readme_test.zig).
     const readme_tests = b.addTest(.{
