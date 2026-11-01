@@ -66,6 +66,10 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zid-shared-generator", .path = "examples/shared_generator/main.zig", .step_name = "run-shared-generator", .desc = "Several threads sharing one AtomicGenerator" },
         .{ .name = "zid-ordering", .path = "examples/ordering/main.zig", .step_name = "run-ordering", .desc = "Id has stable ordering semantics" },
         .{ .name = "zid-live-clock", .path = "examples/live_clock/main.zig", .step_name = "run-live-clock", .desc = "Generator + SystemClock under a real io runtime" },
+        .{ .name = "zid-random", .path = "examples/random/main.zig", .step_name = "run-random", .desc = "RandomOrderedId: ids that need no node id" },
+        .{ .name = "zid-random-testing", .path = "examples/random_testing/main.zig", .step_name = "run-random-testing", .desc = "Deterministic RandomOrderedId tests: ManualClock and a seeded PRNG" },
+
+        .{ .name = "zid-random-threaded", .path = "examples/random_threaded/main.zig", .step_name = "run-random-threaded", .desc = "One RandomGenerator per thread, no node ids" },
         .{ .name = "zid-benchmark", .path = "examples/benchmark/main.zig", .step_name = "run-benchmark", .desc = "Benchmark generator cost and real-clock throughput" },
     };
     // Compiles every example without running it, so one that isn't run in

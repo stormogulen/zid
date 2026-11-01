@@ -276,7 +276,11 @@ pub fn checkTypes(
     if (!isContainer(IdType) or !@hasDecl(IdType, "Layout") or !@hasDecl(IdType, "fromParts") or !@hasDecl(IdType, "timestampFromUnixMillis")) {
         @compileError(generator_name ++ "'s IdType must be a zid.OrderedId type, found " ++ @typeName(IdType));
     }
+    checkClock(generator_name, ClockType);
+}
 
+/// The clock half of the contract, shared with `RandomGenerator`.
+pub fn checkClock(comptime generator_name: []const u8, comptime ClockType: type) void {
     const now_signature = "`pub fn now(self: *" ++ @typeName(ClockType) ++ ") zid.UnixMillis`";
     if (!isContainer(ClockType) or !@hasDecl(ClockType, "now")) {
         @compileError(generator_name ++ "'s ClockType must provide " ++ now_signature);
@@ -297,7 +301,7 @@ pub fn checkTypes(
     }
 }
 
-fn isContainer(comptime T: type) bool {
+pub fn isContainer(comptime T: type) bool {
     return switch (@typeInfo(T)) {
         .@"struct", .@"union", .@"enum", .@"opaque" => true,
         else => false,

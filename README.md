@@ -87,6 +87,9 @@ zig build run-type-safety    # compile-time type distinctness, eql correctness
 zig build run-testing        # deterministic testing with ManualClock
 zig build run-threaded       # one Generator and node id per thread
 zig build run-shared-generator  # several threads sharing one AtomicGenerator
+zig build run-random         # RandomOrderedId: ids that need no node id
+zig build run-random-testing # deterministic RandomOrderedId tests with a seeded PRNG
+zig build run-random-threaded  # one RandomGenerator per thread, no node ids
 zig build run-benchmark -Doptimize=ReleaseFast  # generator cost vs real-clock throughput
 ```
 
@@ -473,6 +476,77 @@ comptime {
     _ = UserId;
 }
 ```
+
+## Ids without node ids
+
+`OrderedId` needs a unique node id per generator, and two generators that
+share one silently issue duplicates. `RandomOrderedId` needs none: it is
+TigerBeetle's recommended layout (and a ULID's), a timestamp in the high
+bits and random bits below it, in one `u128`.
+
+<!-- zig-snippet: random-id -->
+```zig
+const OrderKey = zid.RandomOrderedId(.{
+    .timestamp_bits = 48, // like TigerBeetle and ULID
+    .random_bits = 80,
+    .tag = struct {},
+    .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
+});
+```
+
+The generator takes its randomness the way it takes its clock: passed
+in. `zid.IoRandom` is the operating system's, through `std.Io`:
+
+<!-- zig-snippet: random-generator -->
+```zig
+var clock = zid.MonotonicClock.init(io);
+var random = zid.IoRandom.init(io);
+var gen = zid.RandomGenerator(OrderKey, zid.MonotonicClock, zid.IoRandom).init(.{
+    .clock = &clock,
+    .random = &random,
+});
+
+const key = try gen.next();
+const text = key.toString(); // 26 characters
+```
+
+In tests a seeded PRNG makes every id predictable:
+
+<!-- zig-snippet: random-testing -->
+```zig
+var manual = zid.ManualClock{ .value = OrderKey.epoch.unix_millis + 1_000 };
+var prng: std.Random.DefaultPrng = .init(42); // same seed, same ids
+var gen = zid.RandomGenerator(OrderKey, zid.ManualClock, std.Random.DefaultPrng).init(.{
+    .clock = &manual,
+    .random = &prng,
+});
+```
+
+How it works, and where it differs from TigerBeetle:
+
+- **A new millisecond** starts from fresh random bits, drawn with the top
+  bit clear, so at least half the field is left to count through. With
+  80 bits, running out (`error.SequenceExhausted`) takes 2^79 ids in one
+  millisecond. TigerBeetle moves the timestamp forward instead; zid
+  reports it, as `OrderedId` does.
+- **Within a millisecond** it adds one to the last id's random bits, so
+  one generator's ids strictly increase.
+- **A clock that steps back** is `error.ClockMovedBackwards`, with the
+  same `clock_skew_tolerance_ms` as `Generator`. TigerBeetle absorbs every
+  step back; set the tolerance to `std.math.maxInt(u64)` for that.
+- **Collisions** need two generators whose counting ranges overlap in the
+  same millisecond. For two generators issuing n ids each in one
+  millisecond the chance is about 2n / 2^79: negligible, though slightly
+  higher than for fully random ids, which is the price of ordering.
+- **Threads:** there is no atomic version. Give each thread its own
+  generator; without node ids there is nothing to hand out.
+- **Strings** are 26 characters, strict like `OrderedId`'s. With 48/80
+  bits and `.epoch = .unix` the string is a valid ULID.
+
+Which to use: `OrderedId` when you can assign node ids. It is half the
+size (a `u64`), fully deterministic, and orders ties by node.
+`RandomOrderedId` when assigning node ids is a nuisance: many short-lived
+processes, ids made on clients, devices that come and go.
 
 ## License
 

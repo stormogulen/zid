@@ -191,6 +191,55 @@ const shared = struct {
         _ = try gen.next();
     }
 
+    // --------------------------------------------- Ids without node ids
+
+    // snippet: random-id
+    const OrderKey = zid.RandomOrderedId(.{
+        .timestamp_bits = 48, // like TigerBeetle and ULID
+        .random_bits = 80,
+        .tag = struct {},
+        .epoch = .fromUnixMillis(1_735_689_600_000), // 2025-01-01T00:00:00Z
+    });
+    // end snippet
+
+    test "README: RandomGenerator" {
+        const io = std.testing.io;
+
+        // snippet: random-generator
+        var clock = zid.MonotonicClock.init(io);
+        var random = zid.IoRandom.init(io);
+        var gen = zid.RandomGenerator(OrderKey, zid.MonotonicClock, zid.IoRandom).init(.{
+            .clock = &clock,
+            .random = &random,
+        });
+
+        const key = try gen.next();
+        const text = key.toString(); // 26 characters
+        // end snippet
+
+        try std.testing.expectEqual(26, text.len);
+        try std.testing.expect(key.eql(try OrderKey.parse(&text)));
+    }
+
+    test "README: RandomGenerator in tests" {
+        // snippet: random-testing
+        var manual = zid.ManualClock{ .value = OrderKey.epoch.unix_millis + 1_000 };
+        var prng: std.Random.DefaultPrng = .init(42); // same seed, same ids
+        var gen = zid.RandomGenerator(OrderKey, zid.ManualClock, std.Random.DefaultPrng).init(.{
+            .clock = &manual,
+            .random = &prng,
+        });
+        // end snippet
+
+        var again_clock = zid.ManualClock{ .value = OrderKey.epoch.unix_millis + 1_000 };
+        var again_prng: std.Random.DefaultPrng = .init(42);
+        var again = zid.RandomGenerator(OrderKey, zid.ManualClock, std.Random.DefaultPrng).init(.{
+            .clock = &again_clock,
+            .random = &again_prng,
+        });
+        try std.testing.expectEqual(try gen.next(), try again.next());
+    }
+
     // ------------------------------------------- Sharing a generator across threads
 
     test "README: AtomicGenerator" {

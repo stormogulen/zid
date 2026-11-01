@@ -30,6 +30,12 @@ pub const FieldError = error{
     SequenceOutOfRange,
 };
 
+/// `RandomOrderedId.fromInts`: a runtime integer that doesn't fit its field.
+pub const RandomFieldError = error{
+    TimestampOutOfRange,
+    RandomOutOfRange,
+};
+
 /// `Generator.initAfter`.
 pub const ResumeError = error{
     /// The id to resume after was issued for a different node.

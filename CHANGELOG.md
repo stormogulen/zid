@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Added
+- `RandomOrderedId`: time-ordered ids that need no node id, in one `u128`:
+  a timestamp and random bits (TigerBeetle's recommended layout, and a
+  ULID's). Typed config with a required epoch, like `OrderedId`.
+- `RandomGenerator(Id, Clock, Random)`: single-threaded generator. Fresh
+  random bits (top bit clear) on a new millisecond, plus one within a
+  millisecond; clock steps back and exhaustion are errors, with the same
+  skew tolerance as `Generator`. One random draw per call, so a seeded
+  PRNG makes every id predictable.
+- `zid.IoRandom`: the operating system's randomness through `std.Io`.
+  Any type with `fill(self, []u8)` works, including
+  `std.Random.DefaultPrng`.
+- `encoding.Codec(T)`: the Base32 encoding for any unsigned integer type;
+  `u128` ids are 26 characters, the same as a ULID.
+- An independent reference model, a property test and a fuzz target for
+  `RandomGenerator`.
+- Examples: `examples/random` (`zig build run-random`),
+  `examples/random_testing` (deterministic tests with a seeded PRNG) and
+  `examples/random_threaded` (one generator per thread, no node ids);
+  the benchmark measures `RandomGenerator` with a PRNG and with
+  `IoRandom`.
+- Nothing about `OrderedId`, its generators or its string form changes.
+
+
+## Version 0.1.0
+
+
 ### Documentation and CI
 - Both generators are checked against an independent reference model
   (a property test over every layout, and a fuzz target driving random

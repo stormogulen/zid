@@ -27,6 +27,13 @@ const BenchId = zid.OrderedId(.{
     .epoch = .unix,
 });
 
+const RandomBenchId = zid.RandomOrderedId(.{
+    .timestamp_bits = 48,
+    .random_bits = 80,
+    .tag = struct {},
+    .epoch = .unix,
+});
+
 const iterations = 10_000_000;
 
 const Result = struct {
@@ -103,6 +110,39 @@ fn benchAtomicCost(io: std.Io) !Result {
     };
 }
 
+/// RandomGenerator's cost with a seeded PRNG: one random draw plus the
+/// sequencing, per id. With 80 random bits a millisecond never runs out,
+/// so the clock never has to move.
+fn benchRandomCost(io: std.Io) !Result {
+    var clock = zid.ManualClock{ .value = 1_000 };
+    var prng: std.Random.DefaultPrng = .init(1);
+    var gen = zid.RandomGenerator(RandomBenchId, zid.ManualClock, std.Random.DefaultPrng).init(.{
+        .clock = &clock,
+        .random = &prng,
+    });
+    return benchRandom(io, &gen);
+}
+
+/// The same with the operating system's randomness (`zid.IoRandom`), what
+/// a program would use: the difference is the cost of the CSPRNG.
+fn benchRandomIoCost(io: std.Io) !Result {
+    var clock = zid.ManualClock{ .value = 1_000 };
+    var random = zid.IoRandom.init(io);
+    var gen = zid.RandomGenerator(RandomBenchId, zid.ManualClock, zid.IoRandom).init(.{
+        .clock = &clock,
+        .random = &random,
+    });
+    return benchRandom(io, &gen);
+}
+
+fn benchRandom(io: std.Io, gen: anytype) !Result {
+    const start = std.Io.Timestamp.now(io, .awake);
+    for (0..iterations) |_| {
+        std.mem.doNotOptimizeAway(try gen.next());
+    }
+    return .{ .elapsed_ns = elapsedNs(start, io), .exhausted_retries = 0 };
+}
+
 fn benchRealThroughput(io: std.Io) !Result {
     var clock = zid.MonotonicClock.init(io);
     var gen = zid.Generator(BenchId, zid.MonotonicClock).init(.{
@@ -172,6 +212,12 @@ pub fn main(init: std.process.Init) !void {
     try writer.flush();
 
     try report(writer, "AtomicGenerator cost (ManualClock, uncontended)", try benchAtomicCost(io));
+    try writer.flush();
+
+    try report(writer, "RandomGenerator cost (ManualClock, seeded PRNG)", try benchRandomCost(io));
+    try writer.flush();
+
+    try report(writer, "RandomGenerator cost (ManualClock, IoRandom)", try benchRandomIoCost(io));
     try writer.flush();
 
     try report(writer, "Real throughput (MonotonicClock)", try benchRealThroughput(io));

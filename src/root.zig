@@ -13,6 +13,11 @@ const encoding = @import("encoding.zig");
 pub const OrderedId = @import("ordered/id.zig").OrderedId;
 pub const Config = layout.Config;
 
+pub const RandomOrderedId = @import("random/id.zig").RandomOrderedId;
+pub const RandomConfig = @import("random/id.zig").RandomConfig;
+pub const RandomGenerator = @import("random/generator.zig").RandomGenerator;
+pub const IoRandom = @import("random/source.zig").IoRandom;
+
 pub const Generator = generator.Generator;
 pub const AtomicGenerator = atomic_generator.AtomicGenerator;
 /// Whether `AtomicGenerator` can be used on the target being compiled
@@ -28,6 +33,7 @@ pub const ManualClock = clock.ManualClock;
 pub const UnixMillis = clock.UnixMillis;
 
 pub const FieldError = errors.FieldError;
+pub const RandomFieldError = errors.RandomFieldError;
 pub const TimestampError = errors.TimestampError;
 pub const NextError = errors.NextError;
 pub const ResumeError = errors.ResumeError;
@@ -38,6 +44,10 @@ pub const DecodeError = encoding.DecodeError;
 test {
     _ = @import("ordered/layout.zig");
     _ = @import("ordered/id.zig");
+    _ = @import("random/id.zig");
+    _ = @import("random/generator.zig");
+    _ = @import("random/source.zig");
+    _ = @import("random/properties.zig");
     _ = @import("generator.zig");
     // On 32-bit targets AtomicGenerator is a compile error by design, so
     // its tests are left out there and the rest still compiles.
