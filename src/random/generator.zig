@@ -242,10 +242,11 @@ test "tiny random field: exhaustion is reported, then the next millisecond is fi
     var prng: std.Random.DefaultPrng = .init(3);
     var gen = RandomGenerator(TinyId, clock.ManualClock, std.Random.DefaultPrng).init(.{ .clock = &manual, .random = &prng });
 
-    // Starts at 0 or 1 (top bit clear), so 3 or 2 ids fit before 3 runs out.
+    // Starts at 0 or 1 (top bit clear), and the start value is itself the
+    // first id's random bits: counting 0..3 gives 4 ids, 1..3 gives 3.
     var issued: usize = 0;
     while (gen.next()) |_| issued += 1 else |err| try std.testing.expectEqual(error.SequenceExhausted, err);
-    try std.testing.expect(issued >= 3 - 1 and issued <= 3);
+    try std.testing.expect(issued >= 3 and issued <= 4);
 
     manual.advance(1);
     try std.testing.expectEqual(4, (try gen.next()).timestamp());
@@ -280,5 +281,19 @@ test "two generators sharing a millisecond don't collide in practice" {
     std.mem.sort(TestId, &ids, {}, TestId.lessThan);
     for (ids[1..], ids[0 .. ids.len - 1]) |later, earlier| {
         try std.testing.expect(later.raw() > earlier.raw());
+    }
+}
+
+test "tiny random field: a start of 0 fits four ids, a start of 1 fits three" {
+    // Both possible starts, without depending on what a seed happens to draw.
+    const TinyId = RandomOrderedId(.{ .timestamp_bits = 8, .random_bits = 2, .tag = struct {}, .epoch = .unix });
+    inline for (.{ .{ 0, 4 }, .{ 1, 3 } }) |case| {
+        var last: ?TinyId = null;
+        var issued: usize = 0;
+        while (successor(TinyId, last, 3, case[0], 0)) |id| {
+            issued += 1;
+            last = id;
+        } else |err| try std.testing.expectEqual(error.SequenceExhausted, err);
+        try std.testing.expectEqual(case[1], issued);
     }
 }

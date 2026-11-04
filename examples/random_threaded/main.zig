@@ -5,7 +5,8 @@
 //! Compare examples/threaded: there every thread needs its own node id,
 //! and getting that wrong means duplicates. Here there is nothing to hand
 //! out. Each thread owns a generator, nothing is shared, and the threads
-//! stay apart because their random bits differ.
+//! stay apart because their random bits differ (with overwhelming
+//! probability, not by construction).
 
 const std = @import("std");
 const zid = @import("zid");
@@ -85,14 +86,15 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    // Across threads, every id is unique, with no node ids involved.
+    // Across threads, no id repeated here (collisions are possible in
+    // principle, but vanishingly unlikely with 80 random bits).
     std.mem.sort(EventId, ids, {}, EventId.lessThan);
     for (ids[1..], ids[0 .. ids.len - 1]) |later, earlier| {
-        try check(later.raw() > earlier.raw(), "no collisions across threads");
+        try check(later.raw() > earlier.raw(), "no collisions across threads in this run");
     }
 
     std.debug.print(
-        "{d} threads x {d} ids = {d} total, all unique, no node ids assigned\n",
+        "{d} threads x {d} ids = {d} total, no repeats, no node ids assigned\n",
         .{ thread_count, ids_per_thread, ids.len },
     );
     std.debug.print("earliest: {f}\nlatest:   {f}\n", .{ ids[0].fmtString(), ids[ids.len - 1].fmtString() });

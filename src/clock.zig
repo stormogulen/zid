@@ -56,8 +56,9 @@ pub const SystemClock = struct {
 
 /// Wall-clock milliseconds that never go backwards.
 ///
-/// Reads the wall clock once, at init, and from then on adds the time
-/// measured by a monotonic clock. A later NTP step or manual change of
+/// Reads the wall clock once, at init (bracketed by monotonic readings
+/// so a thread suspended at that moment can't skew the anchor), and from
+/// then on adds the time measured by a monotonic clock. A later NTP step or manual change of
 /// the system time doesn't affect it, so a Generator using it never sees
 /// time run backwards within the process.
 ///
@@ -73,17 +74,36 @@ pub const MonotonicClock = struct {
     start: std.Io.Timestamp,
 
     pub fn init(io: std.Io) MonotonicClock {
-        // Two separate readings, a few microseconds apart, so the anchor
-        // is off by at most that much. At millisecond resolution that is
-        // nothing, and it doesn't drift: the rate difference described
-        // above is what does.
-        return .{
-            .io = io,
-            .wall_at_start = wallMillis(io).millis,
+
+        // The wall clock is read between two monotonic readings, so the
+        // gap between them bounds how far the anchor can be off: if the
+        // thread is suspended mid-init, the gap is large and we try again
+        // instead of keeping a skewed anchor for the clock's lifetime.
+        // The wall reading is taken to lie in the middle of the gap.
+        // After a few unlucky attempts the tightest one is used.
+        const max_attempts = 8;
+        const tight_gap_ns = std.time.ns_per_ms;
+
+        var best: MonotonicClock = undefined;
+        var best_gap_ns: i96 = std.math.maxInt(i96);
+        for (0..max_attempts) |_| {
             // `.boot` intends to include time the system is suspended,
             // so the clock doesn't fall behind across a laptop sleep.
-            .start = .now(io, .boot),
-        };
+
+            const start: std.Io.Timestamp = .now(io, .boot);
+            const wall = wallMillis(io).millis;
+            const gap_ns = start.untilNow(io, .boot).toNanoseconds();
+            if (gap_ns < best_gap_ns) {
+                best_gap_ns = gap_ns;
+                best = .{
+                    .io = io,
+                    .wall_at_start = wall -| nanosToMillis(gap_ns) / 2,
+                    .start = start,
+                };
+            }
+            if (gap_ns < tight_gap_ns) break;
+        }
+        return best;
     }
 
     pub fn now(self: *MonotonicClock) UnixMillis {
@@ -143,7 +163,10 @@ test "MonotonicClock starts at the wall clock and never goes backwards" {
     const wall_after = wallMillis(io).millis;
 
     var previous = clock.now().millis;
-    try std.testing.expect(previous >= wall_before);
+
+    // The anchor is placed in the middle of a bracketed reading, so it can
+    // sit up to a millisecond either side of the wall readings around init.
+    try std.testing.expect(previous + 1 >= wall_before);
     try std.testing.expect(previous <= wall_after + 1);
 
     for (0..1000) |_| {

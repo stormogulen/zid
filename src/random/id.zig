@@ -2,8 +2,10 @@
 //!
 //! The layout TigerBeetle recommends and ULIDs use: the timestamp in the
 //! high bits and random bits below it, in one u128. Two generators never
-//! have to be told apart by a node id; they stay unique because their
-//! random bits differ.
+//! have to be told apart by a node id; they stay apart because their
+//! random bits differ. That is probabilistic: two generators could issue
+//! the same id, but with enough random bits the chance is negligible (see
+//! the "Collisions" note in generator.zig).
 //!
 //! Responsibilities:
 //!
