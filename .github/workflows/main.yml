@@ -26,6 +26,9 @@ jobs:
       - run: zig build run-threaded
       - run: zig build run-shared-generator
       - run: zig build run-live-clock
+      - run: zig build run-random
+      - run: zig build run-random-testing
+      - run: zig build run-random-threaded
       - run: zig build examples # compiles all examples, including the benchmark
       - run: zig build test -Doptimize=ReleaseSafe
       - run: zig build test -Doptimize=ReleaseFast

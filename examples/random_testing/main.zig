@@ -14,8 +14,9 @@ const TestKey = zid.RandomOrderedId(.{
 });
 
 // Deliberately tiny random field, so running out is easy to show: the
-// generator starts each millisecond at 0 or 1 (top bit clear), and 3 is
-// the largest value, so 2 or 3 ids fit in a millisecond.
+// generator starts each millisecond at 0 or 1 (top bit clear), the start
+// is itself the first id's random bits, and 3 is the largest value, so
+// 4 ids fit (0..3) or 3 (1..3).
 const TinyKey = zid.RandomOrderedId(.{
     .timestamp_bits = 48,
     .random_bits = 2,
@@ -102,7 +103,7 @@ pub fn main() !void {
             std.debug.print("tiny field: {d} ids, then {}\n", .{ issued, err });
             try check(err == error.SequenceExhausted, "a full random field is reported");
         }
-        try check(issued == 2 or issued == 3, "2 or 3 ids fit, depending on where the millisecond started");
+        try check(issued == 3 or issued == 4, "3 or 4 ids fit, depending on where the millisecond started");
 
         tiny_clock.advance(1);
         try check((try tiny.next()).timestamp() == 1_001, "a new millisecond recovers");

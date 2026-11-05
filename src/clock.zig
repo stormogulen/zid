@@ -58,9 +58,9 @@ pub const SystemClock = struct {
 ///
 /// Reads the wall clock once, at init (bracketed by monotonic readings
 /// so a thread suspended at that moment can't skew the anchor), and from
-/// then on adds the time measured by a monotonic clock. A later NTP step or manual change of
-/// the system time doesn't affect it, so a Generator using it never sees
-/// time run backwards within the process.
+/// then on adds the time measured by a monotonic clock. A later NTP step
+/// or manual change of the system time doesn't affect it, so a Generator
+/// using it never sees time run backwards within the process.
 ///
 /// Trade-off: any difference in rate between the two clocks accumulates
 /// over the lifetime of the clock. It is normally tiny; create a new
@@ -74,7 +74,6 @@ pub const MonotonicClock = struct {
     start: std.Io.Timestamp,
 
     pub fn init(io: std.Io) MonotonicClock {
-
         // The wall clock is read between two monotonic readings, so the
         // gap between them bounds how far the anchor can be off: if the
         // thread is suspended mid-init, the gap is large and we try again
@@ -84,26 +83,36 @@ pub const MonotonicClock = struct {
         const max_attempts = 8;
         const tight_gap_ns = std.time.ns_per_ms;
 
-        var best: MonotonicClock = undefined;
-        var best_gap_ns: i96 = std.math.maxInt(i96);
-        for (0..max_attempts) |_| {
-            // `.boot` intends to include time the system is suspended,
-            // so the clock doesn't fall behind across a laptop sleep.
-
-            const start: std.Io.Timestamp = .now(io, .boot);
-            const wall = wallMillis(io).millis;
-            const gap_ns = start.untilNow(io, .boot).toNanoseconds();
-            if (gap_ns < best_gap_ns) {
-                best_gap_ns = gap_ns;
-                best = .{
-                    .io = io,
-                    .wall_at_start = wall -| nanosToMillis(gap_ns) / 2,
-                    .start = start,
-                };
-            }
-            if (gap_ns < tight_gap_ns) break;
+        var best = anchor(io);
+        var attempts: usize = 1;
+        while (best.gap_ns >= tight_gap_ns and attempts < max_attempts) : (attempts += 1) {
+            const candidate = anchor(io);
+            if (candidate.gap_ns < best.gap_ns) best = candidate;
         }
-        return best;
+        return best.clock;
+    }
+
+    /// One bracketed reading: a clock anchored to the wall time, and how
+    /// wide the monotonic gap around the wall reading was.
+    const Anchor = struct {
+        clock: MonotonicClock,
+        gap_ns: i96,
+    };
+
+    fn anchor(io: std.Io) Anchor {
+        // `.boot` intends to include time the system is suspended,
+        // so the clock doesn't fall behind across a laptop sleep.
+        const start: std.Io.Timestamp = .now(io, .boot);
+        const wall = wallMillis(io).millis;
+        const gap_ns = start.untilNow(io, .boot).toNanoseconds();
+        return .{
+            .clock = .{
+                .io = io,
+                .wall_at_start = wall -| nanosToMillis(gap_ns) / 2,
+                .start = start,
+            },
+            .gap_ns = gap_ns,
+        };
     }
 
     pub fn now(self: *MonotonicClock) UnixMillis {
