@@ -20,7 +20,7 @@ const zid = b.dependency("zid", .{ .target = target, .optimize = optimize });
 exe.root_module.addImport("zid", zid.module("zid"));
 ```
 
-Requires Zig 0.16.0. Zig 0.17 is not supported yet..
+Requires Zig 0.16.0. Zig 0.17 is not supported yet.
 
 ## Features
 
