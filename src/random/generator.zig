@@ -32,6 +32,10 @@ const generator = @import("../generator.zig");
 const clock = @import("../clock.zig");
 const RandomOrderedId = @import("id.zig").RandomOrderedId;
 
+/// One owner per generator: copying one (`var b = a;`) after it has
+/// issued ids forks its state. Within a millisecond both copies then add
+/// one to the same last id and issue the same id, so pass it by pointer.
+/// Separate generators are fine: each starts from its own random bits.
 pub fn RandomGenerator(
     comptime IdType: type,
     comptime ClockType: type,

@@ -24,6 +24,11 @@ const errors = @import("errors.zig");
 const OrderedId = @import("ordered/id.zig").OrderedId;
 const clock = @import("clock.zig");
 
+/// One owner per generator: copying a generator (`var b = a;`) after it
+/// has issued ids forks its state, and the two copies can issue the same
+/// next id. Pass it by pointer instead. For several threads, give each
+/// its own generator and node id, or share one `AtomicGenerator` by
+/// pointer.
 pub fn Generator(
     comptime IdType: type,
     comptime ClockType: type,
@@ -103,6 +108,9 @@ pub fn Generator(
         /// If the clock is behind `last` (for example after a restart
         /// with a clock that was set back), next() reports
         /// `error.ClockMovedBackwards` instead of issuing duplicates.
+        /// This only holds if no other generator is using the same node
+        /// meanwhile; zid can't enforce that across processes (see
+        /// "Design Constraints" in the README).
         pub fn initAfter(options: Options, last: IdType) errors.ResumeError!Self {
             if (last.node() != options.node) {
                 return error.NodeMismatch;
