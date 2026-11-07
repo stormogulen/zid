@@ -56,11 +56,18 @@ pub const SystemClock = struct {
 
 /// Wall-clock milliseconds that never go backwards.
 ///
-/// Reads the wall clock once, at init (bracketed by monotonic readings
-/// so a thread suspended at that moment can't skew the anchor), and from
-/// then on adds the time measured by a monotonic clock. A later NTP step
-/// or manual change of the system time doesn't affect it, so a Generator
-/// using it never sees time run backwards within the process.
+/// Reads the wall clock once, at init, and from then on adds the time
+/// measured by a monotonic clock. A later NTP step or manual change of
+/// the system time doesn't affect it, so a Generator using it never sees
+/// time run backwards within the process.
+///
+/// Initialization is best-effort. The wall clock is read between two
+/// monotonic readings and taken to lie in the middle of the gap between
+/// them, so the anchor is within half that gap of the true wall time,
+/// plus under 1 ms from rounding to whole milliseconds. Init retries up
+/// to 8 times for a gap under 1 ms and otherwise keeps the tightest
+/// attempt, so a small bound is likely but not guaranteed. (It is only
+/// large if the thread was suspended during init.)
 ///
 /// Trade-off: any difference in rate between the two clocks accumulates
 /// over the lifetime of the clock. It is normally tiny; create a new
@@ -103,12 +110,12 @@ pub const MonotonicClock = struct {
         // `.boot` intends to include time the system is suspended,
         // so the clock doesn't fall behind across a laptop sleep.
         const start: std.Io.Timestamp = .now(io, .boot);
-        const wall = wallMillis(io).millis;
+        const wall_ns = std.Io.Clock.now(.real, io).nanoseconds;
         const gap_ns = start.untilNow(io, .boot).toNanoseconds();
         return .{
             .clock = .{
                 .io = io,
-                .wall_at_start = wall -| nanosToMillis(gap_ns) / 2,
+                .wall_at_start = anchorMillis(wall_ns, gap_ns),
                 .start = start,
             },
             .gap_ns = gap_ns,
@@ -147,6 +154,15 @@ fn wallMillis(io: std.Io) UnixMillis {
 /// The one nanoseconds-to-milliseconds conversion, for points in time
 /// (`UnixMillis.fromNanoseconds`) and durations (`MonotonicClock`) alike.
 /// Rounds down; clamps below 0 and above the u64 range.
+/// The wall time at the first monotonic reading of a bracketed sample:
+/// the wall reading, taken to lie in the middle of the gap, minus half the
+/// gap. In nanoseconds, converted once at the end, so the correction is
+/// exact instead of rounded to whole milliseconds. Pure, so it can be
+/// tested with any readings; clamped like every clock reading.
+fn anchorMillis(wall_ns: i96, gap_ns: i96) u64 {
+    return nanosToMillis(wall_ns - @divTrunc(gap_ns, 2));
+}
+
 fn nanosToMillis(nanoseconds: i96) u64 {
     return std.math.lossyCast(u64, @divTrunc(nanoseconds, std.time.ns_per_ms));
 }
@@ -205,4 +221,26 @@ test "ManualClock.advance saturates instead of overflowing" {
     manual.set(10);
     manual.advance(5);
     try std.testing.expectEqual(15, manual.now().millis);
+}
+
+test "anchorMillis: half the gap is subtracted, in nanoseconds" {
+    const ns_per_ms = std.time.ns_per_ms;
+
+    // No gap: the wall reading is the anchor.
+    try std.testing.expectEqual(5_000, anchorMillis(5_000 * ns_per_ms, 0));
+
+    // A sub-millisecond gap still moves the anchor: 5000.1 ms read inside
+    // a 0.4 ms gap puts the wall time at the first reading at 4999.9 ms.
+    // Correcting in whole milliseconds would have kept 5000.
+    try std.testing.expectEqual(4_999, anchorMillis(5_000 * ns_per_ms + 100_000, 400_000));
+
+    // Exactly one millisecond: half of it.
+    try std.testing.expectEqual(4_999, anchorMillis(5_000 * ns_per_ms, ns_per_ms));
+
+    // A large gap (the thread was suspended during init).
+    try std.testing.expectEqual(9_998, anchorMillis(10_000 * ns_per_ms, 4 * ns_per_ms));
+
+    // Near and before 1970: clamped to 0, never wrapped.
+    try std.testing.expectEqual(0, anchorMillis(ns_per_ms, 10 * ns_per_ms));
+    try std.testing.expectEqual(0, anchorMillis(-5 * ns_per_ms, 0));
 }
