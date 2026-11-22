@@ -40,6 +40,10 @@ const OrderedId = @import("ordered/id.zig").OrderedId;
 
 const supported = @import("target.zig").has_64_bit_atomics;
 
+/// One instance, shared by pointer: every thread calls `next()` on the
+/// same `*AtomicGenerator`. A copy (`var b = a;`) is a second, independent
+/// generator that starts from the same last id, so the two can issue the
+/// same next id.
 pub fn AtomicGenerator(
     comptime IdType: type,
     comptime ClockType: type,
