@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## Version 0.2.0
+
 ### Added
 - `RandomOrderedId`: time-ordered ids that need no node id, in one `u128`:
   a timestamp and random bits (TigerBeetle's recommended layout, and a
@@ -25,9 +27,34 @@
   `IoRandom`.
 - Nothing about `OrderedId`, its generators or its string form changes.
 
+### Fixed
+- The tiny-random-field test and `examples/random_testing` expected 2 or
+  3 ids in a millisecond for a 2-bit random field; it is 3 or 4, since
+  the starting value is itself the first id's random bits. A new test
+  drives `successor` with both possible starts.
+
+### Changed
+- `MonotonicClock.init` reads the wall clock between two monotonic
+  readings and anchors to the middle of the gap, computed in nanoseconds
+  so the correction isn't lost to millisecond rounding. It retries up to
+  8 times for a gap under 1 ms, otherwise keeps the tightest attempt.
+  The anchor math is a pure helper with its own tests.
+
+### Documentation and CI
+- One owner per generator: all three generators document that copying
+  one after it has issued ids forks its state and can repeat ids, and
+  that threads share an `AtomicGenerator` by pointer.
+  `Generator.initAfter` notes that it relies on no other generator
+  using the node meanwhile.
+- `MonotonicClock` documents that initialization is best-effort and
+  states the bound: within half the sampling gap, plus under 1 ms from
+  rounding.
+- `RandomOrderedId` and its examples describe uniqueness across
+  generators as probabilistic (overwhelmingly likely), not guaranteed.
+- CI runs the three random examples (`run-random`, `run-random-testing`,
+  `run-random-threaded`), not only compiles them.
 
 ## Version 0.1.0
-
 
 ### Documentation and CI
 - Both generators are checked against an independent reference model
@@ -47,8 +74,9 @@
 - Document that a clock skew tolerance can make `nextRetrying` wait up
   to the tolerance, and that plain `initAfter` is not crash-safe.
 - CI compiles the benchmark (`zig build examples`), compiles the tests
-  for `aarch64-linux`, `riscv64-linux` and `arm-linux-gnueabihf`
-  (`zig build check -Dtarget=...`), and runs them on `x86-linux`.
+  for `aarch64-linux` and `riscv64-linux` (`zig build check -Dtarget=...`),
+  and compiles the `Generator` tests for `x86-linux`
+  (`zig build check-generator -Dtarget=x86-linux`).
 - Package `examples/` with the library.
 
 ### Added
